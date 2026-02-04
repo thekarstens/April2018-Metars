@@ -16,24 +16,6 @@
 <style>html, body { height:100%; margin:0; }
   #map { height:100%; background:#fff; }
 
-  .panel{ top: 110px;
-
-    position:absolute; top:10px; left:10px; z-index:9999;
-    background:rgba(255,255,255,0.95);
-    border:1px solid #ccc; border-radius:12px;
-    padding:10px;
-    font:600 12px/1.2 Arial, sans-serif;
-    box-shadow: 0 2px 10px rgba(0,0,0,.10);
-    min-width: 330px;
-  }
-  .row{ display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
-  .btn{
-    border:1px solid #333; background:#fff; border-radius:10px;
-    padding:6px 10px; cursor:pointer; font:700 12px Arial;
-  }
-  .btn:active{ transform: translateY(1px); }
-  .mono{ font-family: ui-monospace, Menlo, Consolas, monospace; font-weight:800; }
-
   .dot{
     border-radius:50%;
     border:2px solid #333;
@@ -603,39 +585,6 @@
 
 <div id="map"></div>
 
-<div class="panel">
-  <div style="font-size:13px;margin-bottom:6px">Apr 2018 Case Study</div>
-
-  <!-- Time controls for METAR + Alerts -->
-  <div class="row">
-    <button class="btn" id="backBtn">◀ Time</button>
-    <div class="mono" id="timeLabel">2018-04-14 15Z</div>
-    <button class="btn" id="fwdBtn">Time ▶</button>
-  </div>
-
-  <!-- Day controls for PARTICLES ONLY -->
-  <div class="row">
-    <span class="tiny">Particles day:</span>
-    <button class="btn" id="dayBackBtn">◀ Apr 13</button>
-    <div class="mono" id="dayLabel">Apr 14</div>
-    <button class="btn" id="dayFwdBtn">Apr 15 ▶</button>
-  </div>
-
-  <div class="row">
-    <span style="opacity:.75">Step:</span>
-    <span class="mono">3 hours</span>
-    <span style="opacity:.75;margin-left:auto">Zoom:</span>
-    <span class="mono" id="zoomLabel">6</span>
-  </div>
-
-  <div class="row">
-    <span class="tiny" id="status">Loading…</span>
-  </div>
-
-  <div class="tiny">
-    Wind arrows: direction wind is blowing <b>TO</b> (METAR direction + 180°).
-  </div>
-</div>
 
 <script>
 /* ------------------------------------------------------------
@@ -652,7 +601,7 @@ const osm = L.tileLayer(
 const labels = L.tileLayer(
   "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
   { attribution: "", subdomains:"abcd", maxZoom: 19, pane: "overlayPane" }
-).addTo(map);
+);
 
 // --- Extra Midwest city labels (shows more as you zoom in) ---
 const cityLabelLayer = L.layerGroup().addTo(map);
@@ -700,16 +649,16 @@ function updateCityLabels(){
   // - Use our custom white-bubble labels at mid zooms
   // - Switch to built-in map labels only when zoomed in far enough
   if (z >= 9) {
-    if (!map.hasLayer(osmLabels)) osmLabels.addTo(map);
+    if (!map.hasLayer(labels)) labels.addTo(map);
     if (map.hasLayer(cityLabelLayer)) map.removeLayer(cityLabelLayer);
   } else {
-    if (map.hasLayer(osmLabels)) map.removeLayer(osmLabels);
+    if (map.hasLayer(labels)) map.removeLayer(labels);
     if (!map.hasLayer(cityLabelLayer)) cityLabelLayer.addTo(map);
   }
 
   cityLabelLayer.clearLayers();
 
-  if (z < 6) { return; }
+  if (z < 4) { return; }
 
   if (z >= 4){
     CITIES_TIER1.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
