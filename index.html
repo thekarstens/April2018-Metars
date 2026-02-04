@@ -90,7 +90,9 @@
   }
 
 /* Leaflet layer control nudge down below banner */
-  .leaflet-top.leaflet-right{ top: 70px; }
+  :root{ --banner-offset: 70px; }
+.leaflet-top.leaflet-right{ top: var(--banner-offset); }
+.leaflet-top.leaflet-left{ top: var(--banner-offset); }
 
 /* Simple town label style */
   .town-label{
@@ -242,6 +244,25 @@
   padding:6px 14px 10px 14px;
   font-family: Arial, sans-serif;
 }
+/* Keep all bottom-line controls on one row */
+.bottomline-center{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  width:100%;
+  max-width:1400px;
+  padding:0 14px;
+  flex-wrap:nowrap;
+}
+.bottomline-center > *{ flex:0 0 auto; }
+.bottomline-center .map-title{ margin:0 8px; }
+@media (max-width: 900px){
+  /* allow gentle shrink on small screens without wrapping */
+  .bottomline-center{ gap:10px; padding:0 10px; }
+  .bottomline-center .map-title{ font-size: 32px; }
+}
+
 
 /* Big product word, flexible */
 .banner-product{min-width:200px;display:flex;justify-content:center}
@@ -522,6 +543,19 @@
   .opacity-wrap{ display: none; } /* last resort: hide opacity slider on very small widths */
 }
 
+
+/* --- Mobile banner tightening --- */
+@media (max-width: 600px){
+  :root{ --banner-offset: 110px; }
+  .tvbanner{ padding:6px 10px; }
+  .banner-inner{ flex-wrap:wrap; gap:8px; }
+  .banner-title{ font-size:22px; }
+  .banner-product{ min-width:unset; }
+  .banner-left{ min-width:unset; max-width:100%; }
+  .banner-right{ width:100%; margin-left:0; justify-content:flex-end; }
+  .questionbar{ font-size:12px; }
+}
+
 </style>
 </head>
 
@@ -661,7 +695,21 @@ const CITIES_TIER2 = [
 
 function updateCityLabels(){
   const z = map.getZoom();
+  
+  // --- Declutter strategy ---
+  // - Use our custom white-bubble labels at mid zooms
+  // - Switch to built-in map labels only when zoomed in far enough
+  if (z >= 9) {
+    if (!map.hasLayer(osmLabels)) osmLabels.addTo(map);
+    if (map.hasLayer(cityLabelLayer)) map.removeLayer(cityLabelLayer);
+  } else {
+    if (map.hasLayer(osmLabels)) map.removeLayer(osmLabels);
+    if (!map.hasLayer(cityLabelLayer)) cityLabelLayer.addTo(map);
+  }
+
   cityLabelLayer.clearLayers();
+
+  if (z < 6) { return; }
 
   if (z >= 4){
     CITIES_TIER1.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
@@ -678,7 +726,7 @@ function addTown(name, lat, lon){
   L.marker([lat, lon], {
     icon: L.divIcon({ className:"town-label", html: name, iconSize: null }),
     interactive:false
-  }).addTo(map);
+  }).addTo(cityLabelLayer);
 }
 addTown("Omaha", 41.2565, -95.9345);
 addTown("Des Moines", 41.5868, -93.6250);
@@ -1581,6 +1629,14 @@ refreshAll().catch(err => {
 <script>
   // Hook banner buttons to existing controls
   (function(){
+    function updateBannerOffset(){
+      const b = document.getElementById('banner');
+      if(!b) return;
+      document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 8) + 'px');
+    }
+    updateBannerOffset();
+    window.addEventListener('resize', updateBannerOffset);
+
     const back = document.getElementById('backBtn');
     const fwd  = document.getElementById('fwdBtn');
     const zb   = document.getElementById('zoomOutBtnBanner');
