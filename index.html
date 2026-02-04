@@ -482,6 +482,46 @@
   box-shadow:0 2px 10px rgba(0,0,0,0.25);
   font:800 12px/1 Arial,sans-serif;
 }
+
+/* --- Banner bottom row: force single-line layout --- */
+.banner-bottomline{
+  flex-wrap: nowrap !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+#modeBtn{ flex: 0 0 auto; }
+.opacity-wrap{ flex: 0 1 240px; min-width: 180px; }
+.product-center{
+  flex: 1 1 auto;
+  min-width: 120px;
+  white-space: nowrap;
+  line-height: 1;
+}
+.time-wrap{
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.btime{ white-space: nowrap; }
+.banner-zoom{ flex: 0 0 auto; }
+
+/* Tighten fonts a bit so everything fits under the yellow line */
+.product-center{ font-size: 46px !important; }
+.btime{ font-size: 22px !important; }
+
+/* Responsive: on narrower screens, shrink more but keep one line */
+@media (max-width: 1100px){
+  .product-center{ font-size: 38px !important; }
+  .btime{ font-size: 18px !important; }
+  .opacity-wrap{ flex-basis: 200px; min-width: 150px; }
+}
+@media (max-width: 900px){
+  .product-center{ font-size: 30px !important; }
+  .opacity-wrap{ display: none; } /* last resort: hide opacity slider on very small widths */
+}
+
 </style>
 </head>
 
