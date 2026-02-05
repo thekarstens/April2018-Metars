@@ -684,15 +684,8 @@ addTown("Kansas City", 39.0997, -94.5786);
 addTown("St. Louis", 38.6270, -90.1994);
 map.attributionControl.setPrefix(false);
 
-const statusEl    = document.getElementById("status");
-const timeLabelEl = document.getElementById("timeLabel");
-const dayLabelEl  = document.getElementById("dayLabel");
-const zoomLabelEl = document.getElementById("zoomLabel");
-
-function setStatus(msg){ statusEl.textContent = msg; }
-
-map.on("zoomend", ()=>zoomLabelEl.textContent = String(map.getZoom()));
-zoomLabelEl.textContent = String(map.getZoom());
+const statusEl = document.getElementById("status");
+function setStatus(msg){ if (statusEl) statusEl.textContent = msg; }
 
 /* ------------------------------------------------------------
    2) Time controls (METAR + Alerts)
@@ -781,7 +774,6 @@ function formatCentralLabel(dUtc) {
 }
 
 function updateTimeLabel(){
-  timeLabelEl.textContent = fmtZ(current);
   const bt = document.getElementById("bannerTimeLabel");
   if (bt) bt.textContent = formatCentralLabel(current);
 }
@@ -793,51 +785,30 @@ loadAlertsTimelineIndex().then(()=>{
   updateTimeLabel();
 });
 
-document.getElementById("backBtn").onclick = async () => {
-  current = new Date(current.getTime() - stepHours*3600*1000);
+async function stepTime(deltaHours){
+  current = new Date(current.getTime() + deltaHours*3600*1000);
   snapCurrentToAlertsTimeline();
   updateTimeLabel();
   await refreshAll();
-};
-document.getElementById("fwdBtn").onclick = async () => {
-  current = new Date(current.getTime() + stepHours*3600*1000);
-  snapCurrentToAlertsTimeline();
-  updateTimeLabel();
-  await refreshAll();
-};
+}
 
-// Mirror controls to the master banner (from index 15)
+// Banner time buttons (master controls)
 const backBtnBanner = document.getElementById("backBtnBanner");
 const fwdBtnBanner  = document.getElementById("fwdBtnBanner");
-if (backBtnBanner) backBtnBanner.onclick = document.getElementById("backBtn").onclick;
-if (fwdBtnBanner)  fwdBtnBanner.onclick  = document.getElementById("fwdBtn").onclick;
+if (backBtnBanner) backBtnBanner.onclick = () => stepTime(-stepHours);
+if (fwdBtnBanner)  fwdBtnBanner.onclick  = () => stepTime(+stepHours);
 
+// Banner zoom buttons
 const zoomOutBtnBanner = document.getElementById("zoomOutBtnBanner");
 const zoomInBtnBanner  = document.getElementById("zoomInBtnBanner");
 if (zoomOutBtnBanner) zoomOutBtnBanner.onclick = () => map.zoomOut();
 if (zoomInBtnBanner)  zoomInBtnBanner.onclick  = () => map.zoomIn();
 
 
-
 /* ------------------------------------------------------------
-   3) Day controls (Particles only: Apr 13/14/15)
+   3) Particles day (currently fixed)
 ------------------------------------------------------------ */
-let particleDay = 14; // 13, 14, 15
-function updateDayLabel(){
-  dayLabelEl.textContent = (particleDay === 13) ? "Apr 13" : (particleDay === 15) ? "Apr 15" : "Apr 14";
-}
-updateDayLabel();
-
-document.getElementById("dayBackBtn").onclick = async () => {
-  particleDay = Math.max(13, particleDay - 1);
-  updateDayLabel();
-  await refreshParticlesIfOn();
-};
-document.getElementById("dayFwdBtn").onclick = async () => {
-  particleDay = Math.min(15, particleDay + 1);
-  updateDayLabel();
-  await refreshParticlesIfOn();
-};
+let particleDay = 14; // 13, 14, 15 (change here if needed)
 
 /* ------------------------------------------------------------
    4) Layers
@@ -1576,27 +1547,15 @@ refreshAll().catch(err => {
 </script>
 
 <script>
-  // Hook banner buttons to existing controls
-  (function(){
-    function updateBannerOffset(){
-      const b = document.getElementById('banner');
-      if(!b) return;
-      document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 8) + 'px');
-    }
-    updateBannerOffset();
-    window.addEventListener('resize', updateBannerOffset);
-
-    const back = document.getElementById('backBtn');
-    const fwd  = document.getElementById('fwdBtn');
-    const zb   = document.getElementById('zoomOutBtnBanner');
-    const zi   = document.getElementById('zoomInBtnBanner');
-    const bb   = document.getElementById('backBtnBanner');
-    const fb   = document.getElementById('fwdBtnBanner');
-    if (bb && back) bb.addEventListener('click', ()=> back.click());
-    if (fb && fwd)  fb.addEventListener('click', ()=> fwd.click());
-    if (zi) zi.addEventListener('click', ()=> map.zoomIn());
-    if (zb) zb.addEventListener('click', ()=> map.zoomOut());
-  })();
+(function(){
+  function updateBannerOffset(){
+    const b = document.getElementById('banner');
+    if(!b) return;
+    document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 8) + 'px');
+  }
+  updateBannerOffset();
+  window.addEventListener('resize', updateBannerOffset);
+})();
 </script>
 
 </body>
