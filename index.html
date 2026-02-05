@@ -618,41 +618,44 @@ function makeCityLabel(name, lat, lon){
 }
 
 const CITIES_TIER1 = [
-  // Big “regional anchors” that can show early
   ["Sioux Falls", 43.5446, -96.7311],
   ["Omaha", 41.2565, -95.9345],
-  ["Minneapolis", 44.9778, -93.2650],
-  ["Des Moines", 41.5868, -93.6250],
-  ["Kansas City", 39.0997, -94.5786],
+  ["Minneapolis", 44.9778, -93.265],
+  ["Des Moines", 41.5868, -93.625],
   ["Denver", 39.7392, -104.9903],
+  ["Kansas City", 39.0997, -94.5786],
   ["Chicago", 41.8781, -87.6298]
 ];
 
 const CITIES_TIER2 = [
-  // “One or two per state” at mid zooms (fills gaps without clutter)
-  ["Rapid City", 44.0805, -103.2310],   // SD west
-  ["Pierre", 44.3683, -100.3510],       // SD central
-  ["Fargo", 46.8772, -96.7898],         // ND east
-  ["Bismarck", 46.8083, -100.7837],     // ND central/west
-  ["North Platte", 41.1403, -100.7601], // NE west/central
-  ["Lincoln", 40.8136, -96.7026],       // NE east (pairs with Omaha)
-  ["Rochester", 44.0121, -92.4802],     // MN south
-  ["Sioux City", 42.4990, -96.4003],    // IA/Neb tri-state
-  ["Madison", 43.0731, -89.4012],       // WI
-  ["Milwaukee", 43.0389, -87.9065],     // WI east
-  ["St. Louis", 38.6270, -90.1994]      // downstream reference
+  ["Rapid City", 44.0805, -103.231],
+  ["Pierre", 44.3683, -100.351],
+  ["Fargo", 46.8772, -96.7898],
+  ["Bismarck", 46.8083, -100.7837],
+  ["Lincoln", 40.8136, -96.7026],
+  ["North Platte", 41.1403, -100.7601],
+  ["Rochester", 44.0121, -92.4802],
+  ["Madison", 43.0731, -89.4012],
+  ["Milwaukee", 43.0389, -87.9065],
+  ["St. Louis", 38.627, -90.1994],
+  ["Cheyenne", 41.14, -104.8202],
+  ["Billings", 45.7833, -108.5007],
+  ["Wichita", 37.6872, -97.3301]
 ];
 
 const CITIES_TIER3 = [
-  // Extra towns only when zoomed in tighter
   ["Brookings", 44.3114, -96.7984],
-  ["Watertown", 44.8994, -97.1150],
+  ["Watertown", 44.8994, -97.115],
   ["Aberdeen", 45.4647, -98.4865],
   ["Huron", 44.3633, -98.2143],
-  ["Grand Island", 40.9264, -98.3420],
-  ["Norfolk", 42.0280, -97.4170],
+  ["Grand Island", 40.9264, -98.342],
+  ["Norfolk", 42.028, -97.417],
   ["Scottsbluff", 41.8666, -103.6672],
-  ["Duluth", 46.7867, -92.1005]
+  ["Duluth", 46.7867, -92.1005],
+  ["Topeka", 39.0473, -95.6752],
+  ["Casper", 42.8501, -106.3252],
+  ["Bozeman", 45.6769, -111.0429],
+  ["Springfield", 37.2089, -93.2923]
 ];
 
 function updateCityLabels(){
@@ -883,11 +886,14 @@ class CollisionIndex {
 }
 
 function minSepForZoom(z){
-  if (z <= 4) return 54;
-  if (z === 5) return 46;
-  if (z === 6) return 38;
-  if (z === 7) return 32;
-  return 0; // z >= 8 show all
+  // Wide view: thin aggressively so students aren't overwhelmed.
+  // As you zoom in, we steadily allow more stations to appear.
+  if (z <= 4) return 92;
+  if (z === 5) return 74;
+  if (z === 6) return 56;
+  if (z === 7) return 40;
+  if (z === 8) return 22;
+  return 0; // z >= 9 show all
 }
 function allowByCollision(index, lat, lon, minSepPx){
   if (minSepPx <= 0) return true;
@@ -1465,12 +1471,31 @@ async function refreshAll(){
   const idxWx   = new CollisionIndex(Math.max(24, minSep));
   const idxArr  = new CollisionIndex(Math.max(30, minSep));
 
+  // --- Prevent METAR circles from colliding with city labels (white bubbles) ---
+  const citySep = 34; // px separation between any METAR marker center and a city label anchor
+  const idxCity = new CollisionIndex(Math.max(30, citySep));
+
+  // Seed the collision index with whichever city labels are currently active at this zoom
+  const activeCities = [];
+  if (z >= 4) activeCities.push(...CITIES_TIER1);
+  if (z >= 6) activeCities.push(...CITIES_TIER2);
+  if (z >= 7) activeCities.push(...CITIES_TIER3);
+
+  for (const c of activeCities){
+    const latC = c[1], lonC = c[2];
+    const pC = map.latLngToLayerPoint([latC, lonC]);
+    idxCity.canPlace(pC, citySep); // reserve space around label anchor
+  }
+
   let shown = 0, total = 0;
 
   for (const r of rowsNow){
     const lat = num(r.lat), lon = num(r.lon);
     if (lat == null || lon == null) continue;
     total++;
+
+    // If this station would overlap a city label, skip it at wide zooms
+    if (!allowByCollision(idxCity, lat, lon, citySep)) continue;
 
     const st = (r.station || "").trim();
     const alti = num(r.alti);
