@@ -610,7 +610,7 @@ const labels = L.tileLayer(
 const cityLabelLayer = L.layerGroup().addTo(map);
 
 function makeCityLabel(name, lat, lon){
-  return L.marker([lat, lon], {
+  return L.marker([plat,plon], {
     interactive: false,
     icon: L.divIcon({
       className: "town-label",
@@ -889,21 +889,39 @@ class CollisionIndex {
 }
 
 function minSepForZoom(z){
-  // Wide view: thin aggressively so students aren't overwhelmed.
-  // As you zoom in, we steadily allow more stations to appear.
-  // Goal: when a single state (like SD) is filling the screen, show essentially all stations.
+  // Fallback step function (used if dynamic cannot compute bounds)
   if (z <= 4) return 92;   // very wide
   if (z === 5) return 70;  // wide
   if (z === 6) return 46;  // starting to fill in
   if (z === 7) return 22;  // SD-ish view: mostly filled in
   return 0;                // z >= 8 show all
 }
+
+function dynamicMinSep(){
+  // More robust thinning:
+  // - Use zoom AND the current viewport span (degrees).
+  // - When the view is "state-sized" (like SD filling the screen), show essentially all stations.
+  try{
+    const z = map.getZoom();
+    const b = map.getBounds();
+    const spanLon = Math.abs(b.getEast() - b.getWest());
+    const spanLat = Math.abs(b.getNorth() - b.getSouth());
+    const span = Math.max(spanLon, spanLat);
+
+    // If the current view is roughly state-sized (or tighter), let stations fill in.
+    if (span <= 7.5) return 0;
+
+    return minSepForZoom(z);
+  }catch(e){
+    return minSepForZoom(map.getZoom());
+  }
+}
+
 function allowByCollision(index, lat, lon, minSepPx){
   if (minSepPx <= 0) return true;
   const p = map.latLngToLayerPoint([lat, lon]);
   return index.canPlace(p, minSepPx);
 }
-
 /* ------------------------------------------------------------
    6) Color ramps
 ------------------------------------------------------------ */
@@ -1596,7 +1614,7 @@ async function refreshAll(){
   [tempLayer, dewLayer, windNumLayer, windArrowLayer, gustLayer, visLayer, presLayer, wxLayer].forEach(l => l.clearLayers());
 
   const z = map.getZoom();
-  const minSep = minSepForZoom(z);
+  const minSep = dynamicMinSep();
 
   const idxTemp = new CollisionIndex(Math.max(24, minSep));
   const idxDew  = new CollisionIndex(Math.max(24, minSep));
@@ -1623,18 +1641,57 @@ async function refreshAll(){
     idxCity.canPlace(pC, citySep); // reserve space around label anchor
   }
 
-  let shown = 0, total = 0;
+  
+  // --- Nudge a METAR if it would collide with a city label ---
+  // We try a small set of pixel offsets (relative to the station point) to keep BOTH the city bubble and the METAR visible.
+  // This is especially useful for Sioux Falls and other major hubs where you want the METAR to always show.
+  const STATION_NUDGES = new Map([
+    ["KFSD", [[24, 16],[26,-14],[-26,14],[-26,-14],[0,24],[0,-24],[32,0],[-32,0]]],
+    ["FSD",  [[24, 16],[26,-14],[-26,14],[-26,-14],[0,24],[0,-24],[32,0],[-32,0]]],
+    ["KDEN", [[26, 16],[26,-14],[-26,14],[-26,-14],[0,26],[0,-26],[36,0],[-36,0]]],
+    ["DEN",  [[26, 16],[26,-14],[-26,14],[-26,-14],[0,26],[0,-26],[36,0],[-36,0]]],
+    ["KOMA", [[26, 16],[26,-14],[-26,14],[-26,-14],[0,26],[0,-26],[36,0],[-36,0]]],
+    ["OMA",  [[26, 16],[26,-14],[-26,14],[-26,-14],[0,26],[0,-26],[36,0],[-36,0]]],
+  ]);
+
+  function tryPlaceAgainstCityLabels(lat, lon, station, sepPx){
+    const base = map.latLngToLayerPoint([lat, lon]);
+
+    // Try original first
+    if (idxCity.canPlace(base, sepPx)){
+      const ll0 = map.layerPointToLatLng(base);
+      return {lat: ll0.lat, lon: ll0.lng};
+    }
+
+    const key = (station || "").trim().toUpperCase();
+    const nudges = STATION_NUDGES.get(key) || [[22,14],[22,-14],[-22,14],[-22,-14],[0,22],[0,-22],[30,0],[-30,0]];
+
+    for (const o of nudges){
+      const p = L.point(base.x + o[0], base.y + o[1]);
+      if (idxCity.canPlace(p, sepPx)){
+        const ll = map.layerPointToLatLng(p);
+        return {lat: ll.lat, lon: ll.lng};
+      }
+    }
+    return null;
+  }
+
+let shown = 0, total = 0;
 
   for (const r of rowsNow){
     const lat = num(r.lat), lon = num(r.lon);
     if (lat == null || lon == null) continue;
     total++;
 
-    // If this station would overlap a city label, skip it at wide zooms
-    if (!allowByCollision(idxCity, lat, lon, citySep)) continue;
-
     const st = (r.station || "").trim();
-    const alti = num(r.alti);
+
+    // Keep METAR circles from colliding with city labels (white bubbles).
+    // If it collides, try nudging the METAR slightly so BOTH remain visible.
+    const placed = tryPlaceAgainstCityLabels(lat, lon, st, citySep);
+    if (!placed) continue;
+    const plat = placed.lat, plon = placed.lon;
+
+const alti = num(r.alti);
     const prevA = st ? prevAlt.get(st) : null;
     const dAlt = (alti != null && prevA != null) ? (alti - prevA) : null;
 
@@ -1654,40 +1711,40 @@ async function refreshAll(){
     const visMi = visObj.miles;
 
     if (tmp != null && allowByCollision(idxTemp, lat, lon, minSep)){
-      L.marker([lat,lon], { icon: dotIcon(String(Math.round(tmp)), tempColorF(tmp), 28, 12) })
+      L.marker([plat,plon], { icon: dotIcon(String(Math.round(tmp)), tempColorF(tmp), 28, 12) })
         .bindPopup(popup).addTo(tempLayer);
     }
 
     if (dew != null && allowByCollision(idxDew, lat, lon, minSep)){
-      L.marker([lat,lon], { icon: dotIcon(String(Math.round(dew)), dewColorF(dew), 28, 12) })
+      L.marker([plat,plon], { icon: dotIcon(String(Math.round(dew)), dewColorF(dew), 28, 12) })
         .bindPopup(popup).addTo(dewLayer);
     }
 
     if (mph != null && allowByCollision(idxWind, lat, lon, minSep)){
-      L.marker([lat,lon], { icon: dotIcon(String(Math.round(mph)), windColorMph(mph), 28, 12) })
+      L.marker([plat,plon], { icon: dotIcon(String(Math.round(mph)), windColorMph(mph), 28, 12) })
         .bindPopup(popup).addTo(windNumLayer);
     }
 
     if (mph != null && drct != null && allowByCollision(idxArr, lat, lon, minSep)){
       const toDir = (drct + 180) % 360;
-      L.marker([lat,lon], { icon: windArrowIcon(toDir, mph) })
+      L.marker([plat,plon], { icon: windArrowIcon(toDir, mph) })
         .bindPopup(popup).addTo(windArrowLayer);
     }
 
     if (gmh != null && allowByCollision(idxGust, lat, lon, minSep)){
-      L.marker([lat,lon], { icon: dotIcon(String(Math.round(gmh)), windColorMph(gmh), 30, 12) })
+      L.marker([plat,plon], { icon: dotIcon(String(Math.round(gmh)), windColorMph(gmh), 30, 12) })
         .bindPopup(popup).addTo(gustLayer);
     }
 
     if ((visObj.label || "").trim() && allowByCollision(idxVis, lat, lon, minSep)){
       const style = visStyle(visMi);
-      L.marker([lat,lon], { icon: dotIcon(visObj.label, style.bg, 30, 11, style.border) })
+      L.marker([plat,plon], { icon: dotIcon(visObj.label, style.bg, 30, 11, style.border) })
         .bindPopup(popup).addTo(visLayer);
     }
 
     if (alti != null && allowByCollision(idxPres, lat, lon, minSep)){
       const fill = pressureTrendColor(dAlt);
-      L.marker([lat,lon], { icon: dotIcon(alti.toFixed(2), fill, 44, 12, "#999") })
+      L.marker([plat,plon], { icon: dotIcon(alti.toFixed(2), fill, 44, 12, "#999") })
         .bindPopup(popup).addTo(presLayer);
     }
 
@@ -1695,7 +1752,7 @@ async function refreshAll(){
     const isDay = isDaylightAt(lat, lon, current); // use current map time
     // Show an icon even if wx is blank (represents "clear/none"), but still obey thinning/collision.
     if (allowByCollision(idxWx, lat, lon, minSep)){
-      L.marker([lat,lon], { icon: wxEmojiIcon(wx, isDay, 30) })
+      L.marker([plat,plon], { icon: wxEmojiIcon(wx, isDay, 30) })
         .bindPopup(popup).addTo(wxLayer);
     }
 
