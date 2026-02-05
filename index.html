@@ -888,12 +888,12 @@ class CollisionIndex {
 function minSepForZoom(z){
   // Wide view: thin aggressively so students aren't overwhelmed.
   // As you zoom in, we steadily allow more stations to appear.
-  if (z <= 4) return 92;
-  if (z === 5) return 74;
-  if (z === 6) return 56;
-  if (z === 7) return 40;
-  if (z === 8) return 22;
-  return 0; // z >= 9 show all
+  // Goal: when a single state (like SD) is filling the screen, show essentially all stations.
+  if (z <= 4) return 92;   // very wide
+  if (z === 5) return 70;  // wide
+  if (z === 6) return 46;  // starting to fill in
+  if (z === 7) return 22;  // SD-ish view: mostly filled in
+  return 0;                // z >= 8 show all
 }
 function allowByCollision(index, lat, lon, minSepPx){
   if (minSepPx <= 0) return true;
@@ -1122,7 +1122,7 @@ function popupHTML(r, dAlt){
 ------------------------------------------------------------ */
 const reportType = 3;
 const SD_ONLY = ["SD_ASOS"];
-const REST = ["MN_ASOS","IA_ASOS","NE_ASOS","ND_ASOS","WI_ASOS","IL_ASOS","MI_ASOS"];
+const REST = ["MN_ASOS","IA_ASOS","NE_ASOS","ND_ASOS","WI_ASOS","IL_ASOS","MI_ASOS","MT_ASOS","WY_ASOS","KS_ASOS","MO_ASOS"];
 
 function asosURL(d, networks){
   const iso = toISOZ(d);
