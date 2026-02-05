@@ -20,7 +20,7 @@
     border-radius:50%;
     border:2px solid #333;
     display:flex;align-items:center;justify-content:center;
-    font:800 12px/1 Arial, sans-serif;color:#111;
+    font:800 12px/1 Arial, sans-serif;color:#fff; -webkit-text-stroke: 1.2px #000; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
     box-shadow: 0 1px 3px rgba(0,0,0,.25);
     user-select:none;
   }
@@ -1255,7 +1255,7 @@ function popupHTML(r, dAlt){
 ------------------------------------------------------------ */
 const reportType = 3;
 const SD_ONLY = ["SD_ASOS"];
-const REST = ["MN_ASOS","IA_ASOS","NE_ASOS","ND_ASOS","WI_ASOS","IL_ASOS","MI_ASOS","MT_ASOS","WY_ASOS","KS_ASOS","MO_ASOS"];
+const REST = ["MN_ASOS","IA_ASOS","NE_ASOS","ND_ASOS","WI_ASOS","IL_ASOS","MI_ASOS","MT_ASOS","WY_ASOS","KS_ASOS","MO_ASOS","CO_ASOS"];
 
 function asosURL(d, networks){
   const iso = toISOZ(d);
