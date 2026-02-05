@@ -78,7 +78,7 @@
 
 /* Simple town label style */
   .town-label{
-    background: rgba(255,255,255,0.75);
+    background: #ffffff;
     border:1px solid rgba(0,0,0,0.25);
     padding:2px 6px;
     border-radius:10px;
@@ -477,7 +477,7 @@
 
 /* TV-style city labels */
 .leaflet-tooltip.tv-city-label{
-  background:rgba(255,255,255,0.94);
+  background:#ffffff;
   color:#111;
   border:0;
   border-radius:10px;
@@ -618,28 +618,41 @@ function makeCityLabel(name, lat, lon){
 }
 
 const CITIES_TIER1 = [
+  // Big “regional anchors” that can show early
   ["Sioux Falls", 43.5446, -96.7311],
+  ["Omaha", 41.2565, -95.9345],
   ["Minneapolis", 44.9778, -93.2650],
   ["Des Moines", 41.5868, -93.6250],
-  ["Omaha", 41.2565, -95.9345],
   ["Kansas City", 39.0997, -94.5786],
-  ["Rapid City", 44.0805, -103.2310],
-  ["Denver", 39.7392, -104.9903]
+  ["Denver", 39.7392, -104.9903],
+  ["Chicago", 41.8781, -87.6298]
 ];
 
 const CITIES_TIER2 = [
-  ["Fargo", 46.8772, -96.7898],
-  ["Bismarck", 46.8083, -100.7837],
-  ["Pierre", 44.3683, -100.3510],
+  // “One or two per state” at mid zooms (fills gaps without clutter)
+  ["Rapid City", 44.0805, -103.2310],   // SD west
+  ["Pierre", 44.3683, -100.3510],       // SD central
+  ["Fargo", 46.8772, -96.7898],         // ND east
+  ["Bismarck", 46.8083, -100.7837],     // ND central/west
+  ["North Platte", 41.1403, -100.7601], // NE west/central
+  ["Lincoln", 40.8136, -96.7026],       // NE east (pairs with Omaha)
+  ["Rochester", 44.0121, -92.4802],     // MN south
+  ["Sioux City", 42.4990, -96.4003],    // IA/Neb tri-state
+  ["Madison", 43.0731, -89.4012],       // WI
+  ["Milwaukee", 43.0389, -87.9065],     // WI east
+  ["St. Louis", 38.6270, -90.1994]      // downstream reference
+];
+
+const CITIES_TIER3 = [
+  // Extra towns only when zoomed in tighter
   ["Brookings", 44.3114, -96.7984],
   ["Watertown", 44.8994, -97.1150],
-  ["Rochester", 44.0121, -92.4802],
-  ["Sioux City", 42.4990, -96.4003],
-  ["Lincoln", 40.8136, -96.7026],
-  ["St. Louis", 38.6270, -90.1994],
-  ["Madison", 43.0731, -89.4012],
-  ["Milwaukee", 43.0389, -87.9065],
-  ["Chicago", 41.8781, -87.6298]
+  ["Aberdeen", 45.4647, -98.4865],
+  ["Huron", 44.3633, -98.2143],
+  ["Grand Island", 40.9264, -98.3420],
+  ["Norfolk", 42.0280, -97.4170],
+  ["Scottsbluff", 41.8666, -103.6672],
+  ["Duluth", 46.7867, -92.1005]
 ];
 
 function updateCityLabels(){
@@ -666,22 +679,13 @@ function updateCityLabels(){
   if (z >= 6){
     CITIES_TIER2.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
   }
+  if (z >= 7){
+    CITIES_TIER3.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
+  }
 }
 map.on("zoomend", updateCityLabels);
 updateCityLabels();
 
-// A few always-on towns (like before)
-function addTown(name, lat, lon){
-  L.marker([lat, lon], {
-    icon: L.divIcon({ className:"town-label", html: name, iconSize: null }),
-    interactive:false
-  }).addTo(cityLabelLayer);
-}
-addTown("Omaha", 41.2565, -95.9345);
-addTown("Des Moines", 41.5868, -93.6250);
-addTown("Minneapolis", 44.9778, -93.2650);
-addTown("Kansas City", 39.0997, -94.5786);
-addTown("St. Louis", 38.6270, -90.1994);
 map.attributionControl.setPrefix(false);
 
 const statusEl = document.getElementById("status");
