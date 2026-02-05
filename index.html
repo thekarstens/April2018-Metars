@@ -990,6 +990,139 @@ function dotIcon(txt, fill, size=28, fontSize=12, borderColor="#333"){
 }
 
 /* Wind arrow as inline SVG divIcon */
+
+/* ------------------------------------------------------------
+   7b) Sun position (simple) + Weather icon mapping
+   - Used for "clear" day vs night so we don't show a sun at night.
+------------------------------------------------------------ */
+function julianDayUTC(d){
+  // d is a JS Date (UTC assumed)
+  const Y = d.getUTCFullYear();
+  const M = d.getUTCMonth() + 1;
+  const D = d.getUTCDate();
+  const H = d.getUTCHours() + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600;
+  let y = Y, m = M;
+  if (m <= 2){ y -= 1; m += 12; }
+  const A = Math.floor(y/100);
+  const B = 2 - A + Math.floor(A/4);
+  const JD0 = Math.floor(365.25*(y+4716)) + Math.floor(30.6001*(m+1)) + D + B - 1524.5;
+  return JD0 + H/24;
+}
+
+function solarElevationDeg(lat, lon, dUtc){
+  // Approx solar elevation (degrees) using common NOAA-style math.
+  // lat, lon in degrees (lon positive east; here we use west-negative which is fine).
+  const rad = Math.PI/180;
+  const JD = julianDayUTC(dUtc);
+  const T = (JD - 2451545.0) / 36525.0;
+
+  // Sun geom mean longitude + anomaly
+  let L0 = 280.46646 + T*(36000.76983 + T*0.0003032);
+  L0 = ((L0 % 360) + 360) % 360;
+  const M = 357.52911 + T*(35999.05029 - 0.0001537*T);
+
+  // Eccentricity
+  const e = 0.016708634 - T*(0.000042037 + 0.0000001267*T);
+
+  // Sun equation of center
+  const C = (1.914602 - T*(0.004817 + 0.000014*T))*Math.sin(M*rad)
+          + (0.019993 - 0.000101*T)*Math.sin(2*M*rad)
+          + 0.000289*Math.sin(3*M*rad);
+
+  // True longitude
+  const trueLong = L0 + C;
+
+  // Apparent longitude
+  const omega = 125.04 - 1934.136*T;
+  const lambda = trueLong - 0.00569 - 0.00478*Math.sin(omega*rad);
+
+  // Mean obliquity + corrected obliquity
+  const eps0 = 23 + (26 + ((21.448 - T*(46.815 + T*(0.00059 - T*0.001813))))/60)/60;
+  const eps = eps0 + 0.00256*Math.cos(omega*rad);
+
+  // Declination
+  const sinDec = Math.sin(eps*rad) * Math.sin(lambda*rad);
+  const dec = Math.asin(sinDec);
+
+  // Equation of time (minutes)
+  const y = Math.tan((eps*rad)/2); 
+  const y2 = y*y;
+
+  const sin2L0 = Math.sin(2*L0*rad);
+  const sinM  = Math.sin(M*rad);
+  const cos2L0 = Math.cos(2*L0*rad);
+  const sin4L0 = Math.sin(4*L0*rad);
+  const sin2M = Math.sin(2*M*rad);
+
+  const Etime = 4 * (y2*sin2L0 - 2*e*sinM + 4*e*y2*sinM*cos2L0 - 0.5*y2*y2*sin4L0 - 1.25*e*e*sin2M) * 180/Math.PI;
+
+  // True solar time (minutes)
+  const mins = dUtc.getUTCHours()*60 + dUtc.getUTCMinutes() + dUtc.getUTCSeconds()/60;
+  const tst = (mins + Etime + 4*lon) % 1440;
+
+  // Hour angle
+  let ha = (tst/4 < 0) ? (tst/4 + 180) : (tst/4 - 180);
+  ha = ha * rad;
+
+  const latR = lat * rad;
+  const cosZen = Math.sin(latR)*Math.sin(dec) + Math.cos(latR)*Math.cos(dec)*Math.cos(ha);
+  const zen = Math.acos(Math.max(-1, Math.min(1, cosZen)));
+  const elev = 90 - zen / rad;
+  return elev;
+}
+
+function isDaylightAt(lat, lon, dUtc){
+  return solarElevationDeg(lat, lon, dUtc) > 0;
+}
+
+function normalizeWxCode(s){
+  return (s || "").toUpperCase().replace(/\s+/g, " ").trim();
+}
+
+function pickWxEmoji(wxcodes, isDay){
+  // Priority-based parsing. Works even if multiple codes exist ("-SN BR").
+  const wx = normalizeWxCode(wxcodes);
+
+  // If no codes, treat as "clear/none"
+  if (!wx) return isDay ? "☀️" : "🌙";
+
+  // Thunder first
+  if (wx.includes("TS")) return "⛈️";
+
+  // Freezing rain / ice pellets
+  if (wx.includes("FZRA") || wx.includes("PL") || wx.includes("IC")) return "🧊";
+
+  // Snow / sleet / snow grains
+  if (wx.includes("SN") || wx.includes("SG")) return "🌨️";
+
+  // Rain / drizzle
+  if (wx.includes("RA") || wx.includes("DZ")) return "🌧️";
+
+  // Fog / mist / haze / smoke / blowing dust
+  if (wx.includes("FG") || wx.includes("BR") || wx.includes("HZ") || wx.includes("FU") || wx.includes("DU")) return "🌫️";
+
+  // Showers
+  if (wx.includes("SH")) return "🌦️";
+
+  // Default: cloud (unknown or other)
+  return "☁️";
+}
+
+function wxEmojiIcon(wxcodes, isDay, size=30){
+  const emoji = pickWxEmoji(wxcodes, isDay);
+  // Slightly larger emoji for readability; keep the circle consistent.
+  return L.divIcon({
+    className:"",
+    html:`<div class="dot"
+              style="width:${size}px;height:${size}px;
+                     background:rgba(255,255,255,0.92);
+                     border-color:#999;
+                     font-size:${Math.round(size*0.62)}px;
+                     line-height:1;">${emoji}</div>`,
+    iconSize:[size,size],
+    iconAnchor:[size/2,size/2]
+  });
+}
 function windArrowIcon(bearingDeg, mph){
   const spd = (mph == null || !Number.isFinite(mph)) ? 0 : mph;
   const color = windColorMph(spd);
@@ -1556,8 +1689,10 @@ async function refreshAll(){
     }
 
     const wx = (r.wxcodes || "").trim();
-    if (wx && allowByCollision(idxWx, lat, lon, minSep)){
-      L.marker([lat,lon], { icon: dotIcon(wx, "rgba(255,255,255,0.85)", 30, 10, "#999") })
+    const isDay = isDaylightAt(lat, lon, current); // use current map time
+    // Show an icon even if wx is blank (represents "clear/none"), but still obey thinning/collision.
+    if (allowByCollision(idxWx, lat, lon, minSep)){
+      L.marker([lat,lon], { icon: wxEmojiIcon(wx, isDay, 30) })
         .bindPopup(popup).addTo(wxLayer);
     }
 
