@@ -610,7 +610,7 @@ const labels = L.tileLayer(
 const cityLabelLayer = L.layerGroup().addTo(map);
 
 function makeCityLabel(name, lat, lon){
-  return L.marker([plat,plon], {
+  return L.marker([lat,lon], {
     interactive: false,
     icon: L.divIcon({
       className: "town-label",
@@ -1711,40 +1711,40 @@ const alti = num(r.alti);
     const visMi = visObj.miles;
 
     if (tmp != null && allowByCollision(idxTemp, lat, lon, minSep)){
-      L.marker([plat,plon], { icon: dotIcon(String(Math.round(tmp)), tempColorF(tmp), 28, 12) })
+      L.marker([lat,lon], { icon: dotIcon(String(Math.round(tmp)), tempColorF(tmp), 28, 12) })
         .bindPopup(popup).addTo(tempLayer);
     }
 
     if (dew != null && allowByCollision(idxDew, lat, lon, minSep)){
-      L.marker([plat,plon], { icon: dotIcon(String(Math.round(dew)), dewColorF(dew), 28, 12) })
+      L.marker([lat,lon], { icon: dotIcon(String(Math.round(dew)), dewColorF(dew), 28, 12) })
         .bindPopup(popup).addTo(dewLayer);
     }
 
     if (mph != null && allowByCollision(idxWind, lat, lon, minSep)){
-      L.marker([plat,plon], { icon: dotIcon(String(Math.round(mph)), windColorMph(mph), 28, 12) })
+      L.marker([lat,lon], { icon: dotIcon(String(Math.round(mph)), windColorMph(mph), 28, 12) })
         .bindPopup(popup).addTo(windNumLayer);
     }
 
     if (mph != null && drct != null && allowByCollision(idxArr, lat, lon, minSep)){
       const toDir = (drct + 180) % 360;
-      L.marker([plat,plon], { icon: windArrowIcon(toDir, mph) })
+      L.marker([lat,lon], { icon: windArrowIcon(toDir, mph) })
         .bindPopup(popup).addTo(windArrowLayer);
     }
 
     if (gmh != null && allowByCollision(idxGust, lat, lon, minSep)){
-      L.marker([plat,plon], { icon: dotIcon(String(Math.round(gmh)), windColorMph(gmh), 30, 12) })
+      L.marker([lat,lon], { icon: dotIcon(String(Math.round(gmh)), windColorMph(gmh), 30, 12) })
         .bindPopup(popup).addTo(gustLayer);
     }
 
     if ((visObj.label || "").trim() && allowByCollision(idxVis, lat, lon, minSep)){
       const style = visStyle(visMi);
-      L.marker([plat,plon], { icon: dotIcon(visObj.label, style.bg, 30, 11, style.border) })
+      L.marker([lat,lon], { icon: dotIcon(visObj.label, style.bg, 30, 11, style.border) })
         .bindPopup(popup).addTo(visLayer);
     }
 
     if (alti != null && allowByCollision(idxPres, lat, lon, minSep)){
       const fill = pressureTrendColor(dAlt);
-      L.marker([plat,plon], { icon: dotIcon(alti.toFixed(2), fill, 44, 12, "#999") })
+      L.marker([lat,lon], { icon: dotIcon(alti.toFixed(2), fill, 44, 12, "#999") })
         .bindPopup(popup).addTo(presLayer);
     }
 
@@ -1752,7 +1752,7 @@ const alti = num(r.alti);
     const isDay = isDaylightAt(lat, lon, current); // use current map time
     // Show an icon even if wx is blank (represents "clear/none"), but still obey thinning/collision.
     if (allowByCollision(idxWx, lat, lon, minSep)){
-      L.marker([plat,plon], { icon: wxEmojiIcon(wx, isDay, 30) })
+      L.marker([lat,lon], { icon: wxEmojiIcon(wx, isDay, 30) })
         .bindPopup(popup).addTo(wxLayer);
     }
 
