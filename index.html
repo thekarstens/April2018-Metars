@@ -541,6 +541,14 @@
   .questionbar{ font-size:12px; }
 }
 
+
+/* Hide Student/Teacher button for now (teacher-only prototype) */
+#modeBtn{ display:none !important; }
+
+/* Time slider in banner */
+#timeSlider{ width: 180px; }
+@media (max-width: 1100px){ #timeSlider{ width: 140px; } }
+@media (max-width: 900px){ #timeSlider{ width: 120px; } }
 </style>
 </head>
 
@@ -571,10 +579,11 @@
       </div>
 
       <div class="time-controls" aria-label="Time controls">
-        <button class="bbtn" id="backBtnBanner" title="Back 3 hours">◀</button>
-        <div class="btime" id="bannerTimeLabel">April 14, 2018 7AM</div>
-        <button class="bbtn" id="fwdBtnBanner" title="Forward 3 hours">▶</button>
-      </div>
+         <button class="bbtn" id="backBtnBanner" title="Back 3 hours">◀</button>
+         <div class="btime" id="bannerTimeLabel">April 14, 2018 7AM</div>
+         <input id="timeSlider" type="range" min="0" max="10" value="0" title="Drag time slider"/>
+         <button class="bbtn" id="fwdBtnBanner" title="Forward 3 hours">▶</button>
+       </div>
 
       <button class="bbtn" id="zoomOutBtnBanner" title="Zoom out">−</button>
       <button class="bbtn" id="zoomInBtnBanner" title="Zoom in">+</button>
@@ -599,6 +608,26 @@ const osm = L.tileLayer(
   "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
   { attribution: "© OpenStreetMap © CARTO", subdomains:"abcd", maxZoom: 19 }
 ).addTo(map);
+
+// --- MODIS True Color (NASA GIBS) ---
+// Uses GIBS WMTS REST pattern adapted as XYZ tiles:
+// https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/{Layer}/default/{YYYY-MM-DD}/{TileMatrixSet}/{z}/{y}/{x}.jpg
+function ymd(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  return `${Y}-${M}-${D}`;
+}
+function modisUrlForDate(d){
+  const day = ymd(d);
+  return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${day}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`;
+}
+const modis = L.tileLayer(modisUrlForDate(new Date(Date.UTC(2018,3,14,0,0,0))), {
+  attribution: "NASA GIBS",
+  maxZoom: 9,
+  opacity: 0.70
+});
+// (Not added by default; turn it on via the Layers control)
 
 // Optional label tiles (Carto light labels)
 const labels = L.tileLayer(
@@ -788,17 +817,83 @@ function updateTimeLabel(){
   if (bt) bt.textContent = formatCentralLabel(current);
 }
 updateTimeLabel();
+rebuildTimelineFromIndex();
 
 // Try to load alerts timeline index (if present in repo)
 loadAlertsTimelineIndex().then(()=>{
   snapCurrentToAlertsTimeline();
   updateTimeLabel();
+  rebuildTimelineFromIndex();
 });
+// Banner time slider (WeatherBell-style)
+// - If timeline_index.json exists, we use its times.
+// - Otherwise we fall back to a simple 3-hour timeline for Apr 13–16.
+let TIMELINE = [];
+const timeSlider = document.getElementById("timeSlider");
+let sliderTimer = null;
+
+function buildFallbackTimeline(){
+  const out = [];
+  const start = new Date(Date.UTC(2018,3,13,0,0,0));
+  const end   = new Date(Date.UTC(2018,3,16,0,0,0));
+  for (let t = start.getTime(); t <= end.getTime(); t += stepHours*3600*1000){
+    out.push(new Date(t));
+  }
+  return out;
+}
+
+function rebuildTimelineFromIndex(){
+  if (ALERTS_TIMELINE && ALERTS_TIMELINE.length){
+    TIMELINE = ALERTS_TIMELINE.map(x => new Date(x._d.getTime()));
+  } else {
+    TIMELINE = buildFallbackTimeline();
+  }
+  if (timeSlider){
+    timeSlider.min = 0;
+    timeSlider.max = Math.max(0, TIMELINE.length - 1);
+    syncSliderToCurrent();
+  }
+}
+
+function nearestTimelineIndex(d){
+  if (!TIMELINE.length) return 0;
+  let bestI = 0;
+  let bestDt = Math.abs(d - TIMELINE[0]);
+  for (let i=1;i<TIMELINE.length;i++){
+    const dt = Math.abs(d - TIMELINE[i]);
+    if (dt < bestDt){ bestDt = dt; bestI = i; }
+  }
+  return bestI;
+}
+
+function syncSliderToCurrent(){
+  if (!timeSlider || !TIMELINE.length) return;
+  timeSlider.value = String(nearestTimelineIndex(current));
+}
+
+function setCurrentFromSlider(doRefresh){
+  if (!timeSlider || !TIMELINE.length) return;
+  const idx = Math.max(0, Math.min(TIMELINE.length-1, Number(timeSlider.value)));
+  current = new Date(TIMELINE[idx].getTime());
+  snapCurrentToAlertsTimeline();
+  updateTimeLabel();
+  if (doRefresh){
+    // simple debounce so drag doesn't spam requests
+    if (sliderTimer) clearTimeout(sliderTimer);
+    sliderTimer = setTimeout(()=>refreshAll(), 250);
+  }
+}
+
+if (timeSlider){
+  timeSlider.addEventListener("input", ()=>setCurrentFromSlider(true));
+}
+
 
 async function stepTime(deltaHours){
   current = new Date(current.getTime() + deltaHours*3600*1000);
   snapCurrentToAlertsTimeline();
   updateTimeLabel();
+  syncSliderToCurrent();
   await refreshAll();
 }
 
@@ -813,6 +908,18 @@ const zoomOutBtnBanner = document.getElementById("zoomOutBtnBanner");
 const zoomInBtnBanner  = document.getElementById("zoomInBtnBanner");
 if (zoomOutBtnBanner) zoomOutBtnBanner.onclick = () => map.zoomOut();
 if (zoomInBtnBanner)  zoomInBtnBanner.onclick  = () => map.zoomIn();
+
+// Opacity slider currently controls MODIS (and can later control radar overlays too)
+const opacitySlider = document.getElementById("radarOpacity");
+function setRasterOpacityFromSlider(){
+  if (!opacitySlider) return;
+  const o = Math.max(0, Math.min(1, Number(opacitySlider.value)/100));
+  if (modis) modis.setOpacity(o);
+}
+if (opacitySlider){
+  opacitySlider.addEventListener("input", setRasterOpacityFromSlider);
+  setRasterOpacityFromSlider();
+}
 
 
 /* ------------------------------------------------------------
@@ -839,8 +946,12 @@ const alertsLayer = L.geoJSON(null);
 const particlesToggle = L.layerGroup();
 let particlesLayer = null;
 
+// Jet stream (250mb) velocity particles (Leaflet-Velocity)
+const jetToggle = L.layerGroup();
+let jetLayer = null;
+
 L.control.layers(
-  { "OpenStreetMap": osm },
+  { "OpenStreetMap": osm, "MODIS True Color (Terra)": modis },
   {
     "Temperature (°F)": tempLayer,
     "Dew Point (°F)": dewLayer,
@@ -851,7 +962,8 @@ L.control.layers(
     "Pressure (trend)": presLayer,
     "Weather Codes": wxLayer,
     "Alerts (WWA)": alertsLayer,
-    "Daily wind particles": particlesToggle
+    "Daily wind particles": particlesToggle,
+     "Jet stream (250mb) particles": jetToggle
   },
   { collapsed:false }
 ).addTo(map);
@@ -1574,15 +1686,58 @@ async function refreshParticlesIfOn(){
   }
 }
 
-/* Toggle handlers for particles + alerts */
+async function refreshJetIfOn(){
+  if (!map.hasLayer(jetToggle)) return;
+
+  const url = "./jetstream/jetstream_250mb_20180414_18Z.json"; // you already have this file in the repo
+  try{
+    const r = await fetch(url, { cache:"no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+
+    if (jetLayer){
+      map.removeLayer(jetLayer);
+      jetLayer = null;
+    }
+
+    jetLayer = L.velocityLayer({
+      data: data,
+      displayValues: true,
+      displayOptions: {
+        velocityType: "250mb Wind",
+        displayPosition: "bottomleft",
+        displayEmptyString: "No wind data"
+      },
+      maxVelocity: 100,      // adjust if you want stronger/weaker particle speed scaling
+      velocityScale: 0.01,   // smaller = slower particles
+      particleAge: 60,
+      particleMultiplier: 0.25,
+      lineWidth: 1,
+      opacity: 0.85
+    });
+
+    jetLayer.addTo(map);
+    setStatus("Jet stream particles loaded.");
+  }catch(e){
+    console.warn("Jet stream failed:", e.message);
+    setStatus("Jet stream file not found / not readable.");
+  }
+}
+
+/* Toggle handlers for particles + alerts + jet stream */
 map.on("overlayadd", async (e) => {
   if (e.layer === particlesToggle) await refreshParticlesIfOn();
+  if (e.layer === jetToggle) await refreshJetIfOn();
   if (e.layer === alertsLayer) await loadAlerts();
 });
 map.on("overlayremove", (e) => {
   if (e.layer === particlesToggle && particlesLayer){
     map.removeLayer(particlesLayer);
     particlesLayer = null;
+  }
+  if (e.layer === jetToggle && jetLayer){
+    map.removeLayer(jetLayer);
+    jetLayer = null;
   }
 });
 
@@ -1591,6 +1746,9 @@ map.on("overlayremove", (e) => {
 ------------------------------------------------------------ */
 async function refreshAll(){
   setStatus("Loading METARs…");
+
+  // Keep MODIS layer synced to the current map day (only if turned on)
+  try{ if (map.hasLayer(modis)) modis.setUrl(modisUrlForDate(current)); }catch(e){}
 
   const prev = new Date(current.getTime() - stepHours*3600*1000);
 
