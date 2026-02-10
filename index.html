@@ -75,7 +75,7 @@
   }
 
 /* Leaflet layer control nudge down below banner */
-  :root{ --banner-offset: 70px; }
+  :root{ --banner-offset: 150px; }
 .leaflet-top.leaflet-right{ top: var(--banner-offset); }
 .leaflet-top.leaflet-left{ top: var(--banner-offset); }
 
@@ -549,6 +549,16 @@
 #timeSlider{ width: 180px; }
 @media (max-width: 1100px){ #timeSlider{ width: 140px; } }
 @media (max-width: 900px){ #timeSlider{ width: 120px; } }
+
+/* === FIX: ensure Leaflet controls (layer toggle box) sit below the banner === */
+.leaflet-top.leaflet-right,
+.leaflet-top.leaflet-left{
+  top: var(--banner-offset) !important;
+  margin-top: 0 !important;
+}
+/* extra safety: if Leaflet applies .leaflet-top separately */
+.leaflet-top{ top: var(--banner-offset) !important; }
+
 </style>
 </head>
 
