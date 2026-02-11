@@ -30,10 +30,7 @@
     vertical-align:middle; margin-right:6px;
   }
 
-  /* Observed radar styling */
-  .obs-radar { filter: brightness(1.22) contrast(1.08) saturate(1.05); mix-blend-mode: multiply; }
-
-  /* ===== Banner styles ===== */
+  /* TV-style banner */
   .tvbanner{
     position:absolute; top:0; left:0; right:0; z-index:99999;
     background:rgba(11,28,45,0.92); color:#fff;
@@ -90,7 +87,7 @@
     position: absolute; right: 10px; bottom: 65px; z-index: 900;
     background: rgba(11,28,45,0.85); border: 1px solid rgba(255,255,255,0.2);
     border-radius: 12px; padding: 10px; color: #fff; font-family: Arial;
-    display: none; /* Only show when layer is active */
+    display: none; 
   }
   .leg-bar { width: 140px; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #1e3a8a, #3b82f6, #10b981, #facc15, #ef4444); }
   .leg-labels { display: flex; justify-content: space-between; font: 900 10px Arial; margin-top: 4px; opacity: 0.9; }
@@ -114,7 +111,7 @@
   <div class="banner-divider"></div>
 
   <div class="banner-bottomline">
-      <div class="opacity-wrap" title="Opacity" style="display:flex; align-items:center; gap:8px;">
+      <div class="opacity-wrap" style="display:flex; align-items:center; gap:8px;">
         <span class="op-label" style="font:900 11px Arial;">OPACITY</span>
         <input id="radarOpacity" type="range" min="20" max="100" value="70" style="width:160px;" />
       </div>
@@ -136,7 +133,7 @@
   <div class="leg-labels"><span>30</span><span>70</span><span>100</span><span>130</span><span>160+</span></div>
 </div>
 
-<img id="brandLogo" src="./logo.png" />
+<img id="brandLogo" src="./logo.png" alt="Weather Workshops" />
 <div id="map"></div>
 
 <script>
@@ -189,7 +186,7 @@ async function refreshJetIfOn(){
     const raw = await r.json();
     const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
     
-    // CRITICAL: Force Global Mercator Bounds to prevent "sliver" compression
+    // FORCING GLOBAL BOUNDS to fix the "sliver" issue
     velData.forEach(field => {
       field.header.la1 = 90; field.header.la2 = -90;
       field.header.lo1 = 0;  field.header.lo2 = 360;
@@ -198,36 +195,4 @@ async function refreshJetIfOn(){
     if (jetLayer) map.removeLayer(jetLayer);
     jetLayer = L.velocityLayer({
       displayValues: true,
-      displayOptions: { velocityType: "250mb Wind", position: "bottomleft" },
-      data: velData,
-      maxVelocity: 160, velocityScale: 0.006, particleMultiplier: 1/850, lineWidth: 2, opacity: 0.9
-    });
-    jetLayer.addTo(map);
-    document.getElementById("jetLegend").style.display = "block";
-  } catch(e) { console.error("Jet stream failed:", e); }
-}
-
-/* --- 4) Master Layer Control --- */
-const tempLayer = L.layerGroup().addTo(map);
-const alertsLayer = L.geoJSON(null);
-const windArrowLayer = L.layerGroup();
-const wxLayer = L.layerGroup();
-
-L.control.layers(null, {
-  "Temperature (°F)": tempLayer,
-  "Wind Arrows": windArrowLayer,
-  "Weather Icons": wxLayer,
-  "Alerts (WWA)": alertsLayer,
-  "Jet stream particles": jetToggle
-}, { collapsed: false }).addTo(map);
-
-map.on("overlayadd", e => { if (e.layer === jetToggle) refreshJetIfOn(); });
-map.on("overlayremove", e => { if (e.layer === jetToggle) document.getElementById("jetLegend").style.display = "none"; });
-
-/* --- Keep All Your Original Story/UI Events Below --- */
-document.getElementById("beginStoryBtn").onclick = () => window.open("https://docs.google.com/spreadsheets/d/17Hzg7R2fSHJGbOKAKMqG4QAqA1GlSJwFM-SQwPhQObY/edit?gid=0#gid=0");
-document.getElementById("zoomInBtnBanner").onclick = () => map.zoomIn();
-document.getElementById("zoomOutBtnBanner").onclick = () => map.zoomOut();
-</script>
-</body>
-</html>
+      displayOptions: { velocityType: "250mb Wind", position: "bottom
