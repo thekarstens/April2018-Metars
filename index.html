@@ -1655,10 +1655,42 @@ function particlesFileForDay(dayNum){
 }
 
 function normalizeVelocityJson(raw){
-  if (Array.isArray(raw)) return raw;
-  if (raw && Array.isArray(raw.data)) return raw.data;
-  return raw;
+  // Accept:
+  // 1) Array of windy records [{header,data},{header,data}]
+  // 2) Wrapper {data:[...records...]}
+  // 3) Single record with interleaved u/v pairs in data[] length = nx*ny*2
+  let arr = raw;
+  if (raw && Array.isArray(raw.data)) arr = raw.data;
+
+  if (!Array.isArray(arr)) return arr;
+
+  // Special case: single record with interleaved u/v pairs
+  if (arr.length === 1 && arr[0] && arr[0].header && Array.isArray(arr[0].data)){
+    const h = arr[0].header || {};
+    const nx = h.nx || h.Nx;
+    const ny = h.ny || h.Ny;
+    const d  = arr[0].data;
+
+    if (nx && ny && d.length === nx*ny*2){
+      const n = nx*ny;
+      const u = new Array(n);
+      const v = new Array(n);
+      for (let i=0, j=0; i<n; i++, j+=2){
+        u[i] = d[j];
+        v[i] = d[j+1];
+      }
+
+      const base = { ...h };
+      const hu = { ...base, parameterCategory: 2, parameterNumber: 2, parameterNumberName: "eastward_wind", parameterUnit: "m/s" };
+      const hv = { ...base, parameterCategory: 2, parameterNumber: 3, parameterNumberName: "northward_wind", parameterUnit: "m/s" };
+
+      return [{ header: hu, data: u }, { header: hv, data: v }];
+    }
+  }
+
+  return arr;
 }
+
 
 async function refreshParticlesIfOn(){
   if (!map.hasLayer(particlesToggle)) return;
@@ -1716,7 +1748,8 @@ async function refreshJetIfOn(){
     return;
   }
 
-  const url = "./jetstream/jetstream_250mb_20180414_18Z.json";
+  const JET_FILE = "era5_wind_250hPa_20180410_12z_mercator (1).json";
+  const url = "./jetstream/" + encodeURI(JET_FILE);
   try{
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
