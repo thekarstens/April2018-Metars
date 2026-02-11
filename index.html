@@ -826,6 +826,15 @@ function updateTimeLabel(){
   const bt = document.getElementById("bannerTimeLabel");
   if (bt) bt.textContent = formatCentralLabel(current);
 }
+
+// Banner time slider (WeatherBell-style)
+// - If alerts timeline_index.json exists, we use its times.
+// - Otherwise we fall back to a simple 3-hour timeline for Apr 13–16.
+let TIMELINE = [];
+const timeSlider = document.getElementById("timeSlider");
+let sliderTimer = null;
+
+// Initialize banner label + timeline AFTER slider vars exist (prevents TDZ errors)
 updateTimeLabel();
 rebuildTimelineFromIndex();
 
@@ -835,13 +844,6 @@ loadAlertsTimelineIndex().then(()=>{
   updateTimeLabel();
   rebuildTimelineFromIndex();
 });
-// Banner time slider (WeatherBell-style)
-// - If timeline_index.json exists, we use its times.
-// - Otherwise we fall back to a simple 3-hour timeline for Apr 13–16.
-let TIMELINE = [];
-const timeSlider = document.getElementById("timeSlider");
-let sliderTimer = null;
-
 function buildFallbackTimeline(){
   const out = [];
   const start = new Date(Date.UTC(2018,3,13,0,0,0));
