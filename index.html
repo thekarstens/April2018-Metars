@@ -614,6 +614,35 @@
 ------------------------------------------------------------ */
 const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
 
+
+
+// --- Keep leaflet-velocity canvases aligned with the Leaflet map ---
+// Sometimes leaflet-velocity initializes its canvas before the map has its final size
+// (banner/layout shifts), which can leave the particles "stuck" at the top.
+// This helper forces the velocity canvas to match map.getSize() and triggers a reset.
+function syncVelocityLayerCanvas(layer){
+  try{
+    if (!layer || !map) return;
+    const canvas =
+      layer._canvas ||
+      layer._velocityCanvas ||
+      (layer._container && layer._container.querySelector && layer._container.querySelector("canvas"));
+    if (!canvas) return;
+
+    const s = map.getSize();
+    if (canvas.width !== s.x) canvas.width = s.x;
+    if (canvas.height !== s.y) canvas.height = s.y;
+
+    if (typeof layer._reset === "function") layer._reset();
+    if (typeof layer._redraw === "function") layer._redraw();
+  }catch(_){}
+}
+
+// keep both velocity layers synced on resize/zoom/pan
+map.on("resize zoomend moveend", () => {
+  syncVelocityLayerCanvas(particlesLayer);
+  syncVelocityLayerCanvas(jetLayer);
+});
 /* ------------------------------------------------------------
    Story START button (temporary: opens your Google Sheet in a new tab)
 ------------------------------------------------------------ */
@@ -1787,6 +1816,8 @@ async function refreshParticlesIfOn(){
     });
 
     particlesLayer.addTo(map);
+    // ensure velocity canvas matches final map size
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(particlesLayer); }, 60);
     setStatus(`Particles loaded: ${url.replace("./","")}`);
 
   } catch(e){
@@ -1962,6 +1993,8 @@ async function refreshJetIfOn(){
     });
 
     jetLayer.addTo(map);
+    // ensure velocity canvas matches final map size
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(jetLayer); }, 60);
     setStatus(`Jet stream loaded: ${url.replace("./","")}`);
     console.log("Jet stream layer added:", url, velData[0]?.header);
 
