@@ -1654,15 +1654,48 @@ function particlesFileForDay(dayNum){
   return `./wind_particles_201804${String(dayNum).padStart(2,"0")}.json`;
 }
 
+
 function normalizeVelocityJson(raw){
   // Accept:
   // 1) Array of windy records [{header,data},{header,data}]
   // 2) Wrapper {data:[...records...]}
   // 3) Single record with interleaved u/v pairs in data[] length = nx*ny*2
+  //
+  // Also normalizes orientation so data is NORTH->SOUTH with negative dy
+  // (leaflet-velocity expects this; ERA5 exports often come SOUTH->NORTH).
+
   let arr = raw;
   if (raw && Array.isArray(raw.data)) arr = raw.data;
 
   if (!Array.isArray(arr)) return arr;
+
+  // --- helper: flip rows if dy is positive (south->north) ---
+  function orientNorthToSouth(field){
+    if (!field || !field.header || !Array.isArray(field.data)) return field;
+    const h = field.header;
+    const nx = h.nx || h.Nx;
+    const ny = h.ny || h.Ny;
+    const dy = h.dy;
+    const la1 = h.la1;
+    if (!nx || !ny || typeof dy !== "number" || typeof la1 !== "number") return field;
+
+    // If dy > 0, the grid is likely stored from SOUTH -> NORTH.
+    // Convert to NORTH -> SOUTH by reversing row order and making dy negative,
+    // and adjust la1 to the new NORTH-most latitude.
+    if (dy > 0){
+      const out = new Array(nx*ny);
+      for (let y=0; y<ny; y++){
+        const srcRow = (ny - 1 - y) * nx;
+        const dstRow = y * nx;
+        for (let x=0; x<nx; x++){
+          out[dstRow + x] = field.data[srcRow + x];
+        }
+      }
+      field.data = out;
+      field.header = { ...h, la1: la1 + dy*(ny-1), dy: -dy };
+    }
+    return field;
+  }
 
   // Special case: single record with interleaved u/v pairs
   if (arr.length === 1 && arr[0] && arr[0].header && Array.isArray(arr[0].data)){
@@ -1680,56 +1713,17 @@ function normalizeVelocityJson(raw){
         v[i] = d[j+1];
       }
 
+      // Add the header fields leaflet-velocity expects
       const base = { ...h };
       const hu = { ...base, parameterCategory: 2, parameterNumber: 2, parameterNumberName: "eastward_wind", parameterUnit: "m/s" };
       const hv = { ...base, parameterCategory: 2, parameterNumber: 3, parameterNumberName: "northward_wind", parameterUnit: "m/s" };
 
-      return [{ header: hu, data: u }, { header: hv, data: v }];
+      return [orientNorthToSouth({ header: hu, data: u }), orientNorthToSouth({ header: hv, data: v })];
     }
   }
-  arr = ensureNorthToSouth(arr);
-  return arr;
-}
 
-function ensureNorthToSouth(records){
-  // Leaflet-velocity expects the grid to start at the *northwest* corner
-  // with dy negative (lat decreases as you move "down" the grid).
-  // If dy is positive (south->north storage), flip the data rows and
-  // rewrite la1/dy so the vectors render correctly.
-  if (!Array.isArray(records) || records.length < 2) return records;
-
-  const h = (records[0] && records[0].header) ? records[0].header : {};
-  const nx = Number(h.nx || h.Nx);
-  const ny = Number(h.ny || h.Ny);
-  const dy = Number(h.dy);
-  const la1 = Number(h.la1);
-
-  if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(dy) || !Number.isFinite(la1)) return records;
-  if (dy < 0) return records; // already north->south
-
-  const newLa1 = la1 + dy * (ny - 1); // move to the northern edge
-  const newDy = -Math.abs(dy);
-
-  function flipRows(data){
-    if (!Array.isArray(data) || data.length !== nx * ny) return data;
-    const out = new Array(data.length);
-    for (let row = 0; row < ny; row++){
-      const src = (ny - 1 - row) * nx;
-      const dst = row * nx;
-      for (let col = 0; col < nx; col++){
-        out[dst + col] = data[src + col];
-      }
-    }
-    return out;
-  }
-
-  const u = flipRows(records[0].data);
-  const v = flipRows(records[1].data);
-
-  const hu = { ...(records[0].header || {}), la1: newLa1, dy: newDy };
-  const hv = { ...(records[1].header || {}), la1: newLa1, dy: newDy };
-
-  return [{ header: hu, data: u }, { header: hv, data: v }];
+  // Normal case: multiple fields (u + v)
+  return arr.map(rec => orientNorthToSouth(rec));
 }
 
 
@@ -1756,9 +1750,9 @@ async function refreshParticlesIfOn(){
 
     particlesLayer = L.velocityLayer({
       data: velData,
-      velocityScale: 0.004,
+      velocityScale: 0.01,
       particleAge: 120,
-      particleMultiplier: 1/900,
+      particleMultiplier: 1/700,
       lineWidth: 1.7,
       colorScale: [
         "rgb(0,40,160)",
@@ -1789,8 +1783,23 @@ async function refreshJetIfOn(){
     return;
   }
 
-  const JET_FILE = "era5_wind_250hPa_20180410_12z_mercator.json";
-  const url = "./jetstream/" + encodeURI(JET_FILE);
+  const JET_FILES = [
+    "era5_wind_250hPa_20180410_12z_mercator.json",
+    "era5_wind_250hPa_20180410_12z_mercator (1).json"
+  ];
+
+  // Prefer the clean filename, but fall back if needed.
+  let url = "./jetstream/" + encodeURI(JET_FILES[0]);
+
+  // Some hosts block HEAD; we try a fast existence check and fall back.
+  for (const f of JET_FILES){
+    const testUrl = "./jetstream/" + encodeURI(f);
+    try{
+      const head = await fetch(testUrl, { method:"HEAD", cache:"no-store" });
+      if (head.ok){ url = testUrl; break; }
+    }catch(_){ /* ignore */ }
+  }
+
   try{
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1811,12 +1820,12 @@ async function refreshJetIfOn(){
         displayPosition: "bottomleft",
         displayEmptyString: "No wind data"
       },
-      maxVelocity: 120,
-      velocityScale: 0.008,
-      particleAge: 70,
-      particleMultiplier: 0.35,
-      lineWidth: 1,
-      opacity: 0.85
+      maxVelocity: 160,
+      velocityScale: 0.02,
+      particleAge: 90,
+      particleMultiplier: 1/900,
+      lineWidth: 1.6,
+      opacity: 0.90
     });
 
     jetLayer.addTo(map);
