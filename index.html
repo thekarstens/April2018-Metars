@@ -5,228 +5,2072 @@
 <title>Apr 2018 Case Study – METAR + Wind Arrows + Daily Particles + Alerts</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<!-- Local Leaflet in your repo -->
 <link rel="stylesheet" href="./leaflet.css"/>
 <script src="./leaflet.js"></script>
 
+<!-- Leaflet Velocity (WORKING CDN) -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.css"/>
 <script src="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.js"></script>
 
-<style>
-  html, body { height:100%; margin:0; }
+<style>html, body { height:100%; margin:0; }
   #map { height:100%; background:#fff; }
 
   .dot{
-    border-radius:50%; border:2px solid #333;
-    display:flex; align-items:center; justify-content:center;
-    font:800 12px/1 Arial, sans-serif; color:#fff;
+    border-radius:50%;
+    border:2px solid #333;
+    display:flex;align-items:center;justify-content:center;
+    font:800 12px/1 Arial, sans-serif;
+    color:#fff;
+    /* Lighter contrast for readability (no thick outline) */
     text-shadow: 0 1px 2px rgba(0,0,0,0.55);
     box-shadow: 0 1px 3px rgba(0,0,0,.25);
     user-select:none;
   }
 
   .swatch {
-    display:inline-block; width:12px; height:12px;
-    border:1px solid #333; border-radius:2px;
-    vertical-align:middle; margin-right:6px;
+    display:inline-block;
+    width:12px; height:12px;
+    border:1px solid #333;
+    border-radius:2px;
+    vertical-align:middle;
+    margin-right:6px;
   }
 
-  /* TV-style banner */
+  .tiny {
+    font:600 11px/1.2 Arial, sans-serif;
+    opacity:.78;
+  }
+
+/* Observed radar styling */
+.obs-radar { filter: brightness(1.22) contrast(1.08) saturate(1.05); mix-blend-mode: multiply; }
+
+/* ===== Imported master banner + city label styles from index (15) ===== */
+/* Top TV-style banner */
   .tvbanner{
-    position:absolute; top:0; left:0; right:0; z-index:99999;
-    background:rgba(11,28,45,0.92); color:#fff;
+    position:absolute; top:0; left:0; right:0;
+    z-index:99999;
+    background:rgba(11,28,45,0.94);
+    color:#fff;
+    font:900 26px/1.1 Arial, sans-serif;
+    letter-spacing:0.8px;
+    padding:14px 18px;
     border-bottom:2px solid rgba(255,255,255,0.12);
-  }
-  .tvbanner::before{ content:""; position:absolute; top:0; left:0; right:0; height:4px; background:#2f4e94; }
-
-  .banner-topline{
-    display:flex; align-items:center; justify-content:center; gap:14px;
-    padding:10px 14px 6px 14px; font-family: Arial, sans-serif;
-    text-transform:uppercase; letter-spacing:.7px; position:relative;
-  }
-  .top-lesson{font-weight:900;font-size:22px;white-space:nowrap}
-  .top-question{font-weight:800;font-size:14px;letter-spacing:.2px;text-transform:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
-  .top-q-label{font-weight:900;text-transform:uppercase;letter-spacing:.6px}
-
-  .banner-divider{ height:3px; width:100%; background:#eab35b; opacity:0.95; }
-
-  .banner-bottomline{
-    display:flex; justify-content:space-between; align-items:center;
-    padding:6px 14px 10px 14px; font-family: Arial, sans-serif; gap: 12px;
+    text-transform:uppercase;
+    pointer-events:none;
   }
 
-  .product-center{
-    font:900 46px/1 Arial,sans-serif; letter-spacing:1px;
-    text-transform:uppercase; white-space:nowrap; flex: 1; text-align: center;
-  }
-
-  .bbtn{pointer-events:auto;border:1px solid rgba(255,255,255,0.35);background:rgba(0,0,0,0.25);color:#fff;
-    padding:7px 10px;border-radius:10px;font-weight:800;cursor:pointer;font-size:12px;}
-
-  .bbtn-story{
-    position:absolute; right:16px; top:10px;
-    background:#fdd835 !important; color:#111 !important;
-    padding:10px 14px !important; border-radius:14px !important;
-    font:900 13px Arial !important;
-  }
-
-  .btime{font:900 22px/1 Arial,sans-serif;letter-spacing:.7px;text-transform:uppercase;white-space:nowrap;min-width:180px;text-align:center;}
-
+/* Branding logo (bottom-right, small) */
   #brandLogo{
-    position:absolute;right:10px;bottom:-24px;width:150px;z-index:900;pointer-events:none;
-    filter: drop-shadow(0 3px 10px rgba(0,0,0,.35));
+    position:absolute;
+    bottom:6px;
+    right:10px;
+    z-index:100000;
+    width:140px;
+    max-width:24vw;
+    height:auto;
+    opacity:0.95;
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,0.25));
+    pointer-events:none;
   }
 
+/* Leaflet layer control nudge down below banner */
+  :root{ --banner-offset: 150px; }
+.leaflet-top.leaflet-right{ top: var(--banner-offset); }
+.leaflet-top.leaflet-left{ top: var(--banner-offset); }
+
+/* Simple town label style */
   .town-label{
-    background: #ffffff; border:1px solid rgba(0,0,0,0.25); padding:2px 6px;
-    border-radius:10px; font:800 11px/1 Arial, sans-serif;
+    background: #ffffff;
+    border:1px solid rgba(0,0,0,0.25);
+    padding:2px 6px;
+    border-radius:10px;
+    font:800 11px/1 Arial, sans-serif;
     box-shadow: 0 1px 4px rgba(0,0,0,.15);
   }
 
-  :root{ --banner-offset: 130px; }
-  .leaflet-top{ top: var(--banner-offset) !important; }
+/* --- Banner layout + controls --- */
+.tvbanner{height:76px;padding:10px 14px;pointer-events:auto;}
+
+.banner-inner{height:100%;display:flex;align-items:center;gap:16px;}
+
+.banner-title{font-size:34px;font-weight:900;letter-spacing:1px;white-space:nowrap;text-transform:uppercase;}
+
+.banner-controls{display:flex;align-items:center;gap:10px;margin-left:10px;}
+
+.bbtn{pointer-events:auto;border:1px solid rgba(255,255,255,0.35);background:rgba(0,0,0,0.25);color:#fff;
+  padding:6px 10px;border-radius:10px;font-weight:800;cursor:pointer;line-height:1;}
+
+.bbtn:hover{background:rgba(0,0,0,0.4);}
+
+.btime{min-width:190px;text-align:center;font-weight:800;letter-spacing:.2px;}
+
+.banner-actions{margin-left:auto;display:flex;align-items:center;gap:10px;}
+
+#brandLogo{
+  position:absolute;right:18px;bottom:6px;width:210px;z-index:900;pointer-events:none;
+  filter: drop-shadow(0 3px 10px rgba(0,0,0,.35));
+}
+
+/* --- layout tweaks --- */
+  .leaflet-top.leaflet-right{ margin-top: 90px; }
+
+/* push layer toggles below banner */
+  #brandLogo{ bottom: 26px; right: 26px; }
+
+/* --- Banner: simple classroom layout --- */
+.tvbanner{height:auto; padding:10px 14px; pointer-events:auto;}
+
+.banner-inner{display:flex; align-items:center; gap:14px;}
+
+.banner-left{display:flex; align-items:center; gap:12px; min-width:340px;}
+
+.bbtn-story{font:900 14px/1 Arial, sans-serif; padding:10px 12px; border-radius:12px; background:rgba(255,255,255,0.10);}
+
+.bbtn-story:hover{background:rgba(255,255,255,0.18);}
+
+.banner-mid{display:flex; align-items:center; gap:10px;}
+
+.btime{min-width:230px; text-align:center; font:900 14px/1 Arial, sans-serif; letter-spacing:.3px;}
+
+.banner-right{margin-left:auto; display:flex; align-items:center; gap:10px;}
+
+.product-right{font:900 32px/1 Arial, sans-serif; letter-spacing:1px; text-transform:uppercase; padding-left:10px; border-left:1px solid rgba(255,255,255,0.25);}
+
+.leg-mini-label{font:900 11px/1 Arial, sans-serif; opacity:.92; text-transform:uppercase; letter-spacing:.4px;}
+
+.leg-mini-bar{display:inline-block; width:110px; height:10px; border-radius:6px; background: linear-gradient(90deg, #2b83ba, #4ecdc4, #a8e6a3, #ffd166, #ef476f); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);}
+
+.opacity-wrap{display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:12px; border:1px solid rgba(255,255,255,0.25); background:rgba(0,0,0,0.18);}
+
+.op-label{font:900 11px/1 Arial, sans-serif; opacity:.92; text-transform:uppercase; letter-spacing:.4px;}
+
+#radarOpacity{width:120px;}
+
+/* --- Begin story: big + obvious (yellow) --- */
+.bbtn-story{
+  background:#fdd835 !important;
+  color:#111 !important;
+  border-color: rgba(0,0,0,0.35) !important;
+  font:900 14px/1 Arial,sans-serif !important;
+  padding:12px 14px !important;
+  border-radius:14px !important;
+  letter-spacing:.8px !important;
+}
+
+.bbtn-story:hover{filter:brightness(0.96)}
+
+/* --- Product center --- */
+.banner-product{display:flex;align-items:center;justify-content:center;min-width:240px}
+
+.product-center{
+  font:900 42px/1 Arial,sans-serif;
+  letter-spacing:1px;
+  text-transform:uppercase;
+  padding:0 10px;
+  white-space:nowrap;
+}
+
+/* Logo down a bit */
+#brandLogo{bottom:6px !important; right:26px !important;}
+
+/* --- Option-2 style driving question block --- */
+.banner-left{display:flex;flex-direction:column;gap:2px;min-width:420px;max-width:44vw}
+
+.banner-mid-stack{gap:10px}
+
+/* Give the product a little breathing room */
+.banner-product{margin:0 6px}
+
+/* --- Banner alignment fix: pull legend/controls back up --- */
+.banner-inner{align-items:flex-start}
+
+.opacity-wrap{margin-top:0}
+
+/* --- Restore "like before" banner geometry --- */
+.banner-inner{position:relative; align-items:center !important;}
+
+.legend-mini, .opacity-wrap{margin-top:0 !important;}
+
+/* Logo lower */
+#brandLogo{bottom:0px !important;}
+
+/* --- Two-line banner layout --- */
+.tvbanner{
+  position:absolute; top:0; left:0; right:0;
+  z-index:99999;
+  background:rgba(11,28,45,0.90);
+  color:#fff;
+  border-bottom:2px solid rgba(255,255,255,0.12);
+}
+
+.banner-topline{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 14px 6px 14px;
+  font-family: Arial, sans-serif;
+  text-transform:uppercase;
+  letter-spacing:.7px;
+}
+
+.top-lesson{font-weight:900;font-size:26px;white-space:nowrap}
+
+.top-sep{opacity:.65;font-weight:900}
+
+.top-question{font-weight:800;font-size:16px;letter-spacing:.2px;text-transform:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;flex:1 1 100%;text-align:center}
+
+.top-q-label{font-weight:900;text-transform:uppercase;letter-spacing:.6px}
+
+.banner-bottomline{
+  display:flex;
+  justify-content:center;
+  padding:6px 14px 10px 14px;
+  font-family: Arial, sans-serif;
+}
+/* Keep all bottom-line controls on one row */
+.bottomline-center{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  width:100%;
+  max-width:1400px;
+  padding:0 14px;
+  flex-wrap:nowrap;
+}
+.bottomline-center > *{ flex:0 0 auto; }
+.bottomline-center .map-title{ margin:0 8px; }
+@media (max-width: 900px){
+  /* allow gentle shrink on small screens without wrapping */
+  .bottomline-center{ gap:10px; padding:0 10px; }
+  .bottomline-center .map-title{ font-size: 32px; }
+}
+
+
+/* Big product word, flexible */
+.banner-product{min-width:200px;display:flex;justify-content:center}
+
+.product-center{
+  font:900 44px/1 Arial,sans-serif;
+  letter-spacing:1px;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+.time-controls{display:flex;align-items:center;gap:10px}
+
+.btime{font:900 16px/1 Arial,sans-serif;letter-spacing:.7px;text-transform:uppercase;white-space:nowrap}
+
+/* Begin button */
+.bbtn-story{
+  background:#fdd835 !important;
+  color:#111 !important;
+  border-color: rgba(0,0,0,0.35) !important;
+  font:900 14px/1 Arial,sans-serif !important;
+  padding:12px 16px !important;
+  border-radius:14px !important;
+  letter-spacing:.8px !important;
+}
+
+/* Opacity group */
+.opacity-wrap{display:flex;align-items:center;gap:8px}
+
+.op-label{font:900 12px/1 Arial,sans-serif;letter-spacing:.7px;text-transform:uppercase}
+
+#radarOpacity{width:180px}
+
+/* Map legend near logo */
+.map-legend{
+  position:absolute;
+  right:190px;
+  bottom:26px;
+  z-index:900;
+  background:rgba(11,28,45,0.80);
+  border:1px solid rgba(255,255,255,0.18);
+  border-radius:12px;
+  padding:8px 10px;
+  color:#fff;
+  font-family: Arial, sans-serif;
+}
+
+.map-legend-row{display:flex;align-items:center;gap:10px}
+
+.leg-mini-label{font:900 12px/1 Arial,sans-serif;letter-spacing:.7px;text-transform:uppercase;opacity:.95}
+
+.leg-mini-bar{
+  width:140px;height:10px;border-radius:7px;
+  background:linear-gradient(90deg,#2b83ba,#ffd166,#ef476f);
+}
+
+/* Keep logo low */
+#brandLogo{bottom:0px !important; right:26px !important;}
+
+/* --- Brand color stripes (from Weather Workshops logo) --- */
+.tvbanner{ position:absolute; }
+
+.tvbanner::before{
+  content:"";
+  position:absolute;
+  top:0; left:0; right:0;
+  height:4px;
+  background:#2f4e94;
+}
+
+.tvbanner{position:absolute; top:0; left:0; right:0; z-index:99999; }
+
+.banner-topline{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  padding:14px 14px 8px 14px;
+  font-family: Arial, sans-serif;
+  text-transform:uppercase;
+  letter-spacing:.7px;
+  position:relative;
+}
+
+.banner-topline .topline-center{
+  flex:1;
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+  max-width:1200px;
+  justify-content:center;
+  flex-wrap:wrap;
+  padding-right:190px; /* reserve space so button doesn't overlap text */
+}
+
+.banner-topline .bbtn-story{
+  position:absolute;
+  right:14px;
+  top:10px;
+}
+
+.banner-bottomline{padding:6px 14px 12px 14px;}
+
+.map-legend{
+  right:12px !important;
+  bottom:70px !important;
+  padding:7px 9px !important;
+  border-radius:12px !important;
+}
+
+.leg-mini-bar{width:120px !important;}
+
+#brandLogo{bottom:0px !important; right:14px !important;}
+
+/* Pin START button in top-right of the top banner line */
+.banner-topline{position:relative !important;}
+
+.banner-topline > .bbtn-story{
+  position:absolute !important;
+  right:14px !important;
+  top:10px !important;
+}
+
+/* Orange divider line in the middle (between top line and controls line) */
+.banner-divider{
+  height:3px;
+  width:100%;
+  background:#eab35b; /* brand orange */
+  opacity:0.95;
+}
+
+/* Nudge legend tighter into the corner */
+.map-legend{right:10px !important; bottom:62px !important;}
+
+/* Force START button to upper-right corner */
+.banner-topline{
+  position:relative !important;
+}
+
+.banner-topline .bbtn-story{
+  position:absolute !important;
+  right:16px !important;
+  top:50% !important;
+  transform:translateY(-50%) !important;
+}
+
+/* --- FINAL banner alignment fixes --- */
+
+/* True center for top line text */
+.banner-topline{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+}
+
+.banner-topline .topline-center{
+  margin:0 auto !important;
+  text-align:center !important;
+  padding-right:0 !important;
+}
+
+/* Force START button to true upper-right corner */
+.banner-topline .bbtn-story{
+  position:absolute !important;
+  right:16px !important;
+  top:12px !important;
+  transform:none !important;
+}
+
+/* Center RADAR on second row */
+.banner-bottomline{
+  display:flex !important;
+  justify-content:center !important;
+}
+
+.banner-product{
+  margin:0 auto !important;
+}
+
+.product-center{
+  text-align:center !important;
+}
+
+/* --- Pin START button to upper-right (top line) --- */
+.banner-topline{position:relative !important;}
+
+.banner-topline #beginStoryBtn{
+  position:absolute !important;
+  right:16px !important;
+  top:10px !important;
+  transform:none !important;
+}
+
+/* --- Push logo slightly LOWER than the bottom edge (so it "sits lower") --- */
+#brandLogo{
+  bottom:-12px !important;
+  right:10px !important;
+}
+
+/* Slightly tighter banner height (small) */
+.banner-topline{padding-top:8px !important; padding-bottom:5px !important;}
+
+.banner-bottomline{padding-top:3px !important; padding-bottom:7px !important;}
+
+/* --- Slight banner shrink (top text + controls) --- */
+.top-lesson{font-size:22px !important;}
+
+.top-question{font-size:14px !important;}
+
+.product-center{font-size:38px !important;}
+
+.bbtn{padding:7px 10px !important; font-size:12px !important;}
+
+.bbtn-story{padding:10px 14px !important; font-size:13px !important;}
+
+#radarOpacity{width:160px !important;}
+
+.banner-topline{padding-top:7px !important; padding-bottom:4px !important;}
+
+.banner-bottomline{padding-top:2px !important; padding-bottom:6px !important;}
+
+/* --- Brand logo: smaller + lower --- */
+#brandLogo{
+  width:150px !important;
+  height:auto !important;
+  bottom:-24px !important;
+  right:10px !important;
+  opacity:0.95 !important;
+}
+
+/* TV-style city labels */
+.leaflet-tooltip.tv-city-label{
+  background:#ffffff;
+  color:#111;
+  border:0;
+  border-radius:10px;
+  padding:4px 8px;
+  box-shadow:0 2px 10px rgba(0,0,0,0.25);
+  font:800 12px/1 Arial,sans-serif;
+}
+
+/* --- Banner bottom row: force single-line layout --- */
+.banner-bottomline{
+  flex-wrap: nowrap !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+#modeBtn{ flex: 0 0 auto; }
+.opacity-wrap{ flex: 0 1 240px; min-width: 180px; }
+.product-center{
+  flex: 1 1 auto;
+  min-width: 120px;
+  white-space: nowrap;
+  line-height: 1;
+}
+.time-wrap{
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.btime{ white-space: nowrap; }
+.banner-zoom{ flex: 0 0 auto; }
+
+/* Tighten fonts a bit so everything fits under the yellow line */
+.product-center{ font-size: 46px !important; }
+.btime{ font-size: 22px !important; }
+
+/* Responsive: on narrower screens, shrink more but keep one line */
+@media (max-width: 1100px){
+  .product-center{ font-size: 38px !important; }
+  .btime{ font-size: 18px !important; }
+  .opacity-wrap{ flex-basis: 200px; min-width: 150px; }
+}
+@media (max-width: 900px){
+  .product-center{ font-size: 30px !important; }
+  .opacity-wrap{ display: none; } /* last resort: hide opacity slider on very small widths */
+}
+
+
+/* --- Mobile banner tightening --- */
+@media (max-width: 600px){
+  :root{ --banner-offset: 110px; }
+  .tvbanner{ padding:6px 10px; }
+  .banner-inner{ flex-wrap:wrap; gap:8px; }
+  .banner-title{ font-size:22px; }
+  .banner-product{ min-width:unset; }
+  .banner-left{ min-width:unset; max-width:100%; }
+  .banner-right{ width:100%; margin-left:0; justify-content:flex-end; }
+  .questionbar{ font-size:12px; }
+}
+
+
+/* Hide Student/Teacher button for now (teacher-only prototype) */
+#modeBtn{ display:none !important; }
+
+/* Time slider in banner */
+#timeSlider{ width: 180px; }
+@media (max-width: 1100px){ #timeSlider{ width: 140px; } }
+@media (max-width: 900px){ #timeSlider{ width: 120px; } }
+
+/* === FIX: ensure Leaflet controls (layer toggle box) sit below the banner === */
+.leaflet-top.leaflet-right,
+.leaflet-top.leaflet-left{
+  top: var(--banner-offset) !important;
+  margin-top: 0 !important;
+}
+/* extra safety: if Leaflet applies .leaflet-top separately */
+.leaflet-top{ top: var(--banner-offset) !important; }
+
 </style>
 </head>
 
 <body>
 
 <div id="banner" class="tvbanner">
-  <div class="banner-topline">
+  <div class="banner-topline" role="banner">
     <div class="topline-center">
       <span class="top-lesson">Lesson: METAR Analysis</span>
       <span class="top-sep">—</span>
       <span class="top-question"><span class="top-q-label">Question:</span> How can we use real-time weather data to make safer decisions?</span>
     </div>
-    <button class="bbtn bbtn-story" id="beginStoryBtn">START</button>
+<button class="bbtn bbtn-story" id="beginStoryBtn" title="Begin the guided story">START</button>
   </div>
-  <div class="banner-divider"></div>
+  <div class="banner-divider" aria-hidden="true"></div>
 
   <div class="banner-bottomline">
-      <div class="opacity-wrap" style="display:flex; align-items:center; gap:8px;">
-        <span class="op-label" style="font:900 11px Arial;">OPACITY</span>
-        <input id="radarOpacity" type="range" min="20" max="100" value="70" style="width:160px;" />
+    <div class="bottomline-center">
+<button class="bbtn" id="modeBtn" title="Toggle Student / Teacher mode">STUDENT</button>
+
+      <div class="opacity-wrap" title="Opacity">
+        <span class="op-label">Opacity</span>
+        <input id="radarOpacity" type="range" min="20" max="100" value="70" />
       </div>
-      <div class="product-center" id="productLabel">METARS</div>
-      <div class="time-controls" style="display:flex; align-items:center; gap:10px;">
-         <button class="bbtn" id="backBtnBanner">◀</button>
+
+      <div class="banner-product" aria-label="Product shown">
+        <div class="product-center" id="productLabel">METARS</div>
+      </div>
+
+      <div class="time-controls" aria-label="Time controls">
+         <button class="bbtn" id="backBtnBanner" title="Back 3 hours">◀</button>
          <div class="btime" id="bannerTimeLabel">April 14, 2018 7AM</div>
-         <input id="timeSlider" type="range" min="0" max="10" value="0" style="width:140px;"/>
-         <button class="bbtn" id="fwdBtnBanner">▶</button>
+         <input id="timeSlider" type="range" min="0" max="10" value="0" title="Drag time slider"/>
+         <button class="bbtn" id="fwdBtnBanner" title="Forward 3 hours">▶</button>
        </div>
-      <button class="bbtn" id="zoomOutBtnBanner">−</button>
-      <button class="bbtn" id="zoomInBtnBanner">+</button>
+
+      <button class="bbtn" id="zoomOutBtnBanner" title="Zoom out">−</button>
+      <button class="bbtn" id="zoomInBtnBanner" title="Zoom in">+</button>
+    </div>
   </div>
+
+  <div id="status" class="bstatus" style="display:none;"></div>
 </div>
 
-<img id="brandLogo" src="./logo.png" />
+<img id="brandLogo" src="./logo.png" alt="Weather Workshops" />
+
 <div id="map"></div>
 
-<script>
-/* --- 1) Map Setup --- */
-const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
-const osm = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png", { attribution: "© OpenStreetMap © CARTO" }).addTo(map);
 
-/* --- 2) Velocity Normalizer (FIXED) --- */
-function normalizeVelocityJson(raw, opts={}){
-  const flipDyPositive = !!opts.flipDyPositive;
-  function ensureBounds(h){
-    if (!h) return h;
-    const nx = h.nx || h.Nx, ny = h.ny || h.Ny;
-    const dx = h.dx ?? h.Dx, dy = h.dy ?? h.Dy;
-    const lo1 = h.lo1 ?? h.Lo1, la1 = h.la1 ?? h.La1;
-    if (nx && ny && typeof dx === "number"){
-      h.lo2 = h.lo2 ?? (lo1 + dx * (nx - 1));
-      h.la2 = h.la2 ?? (la1 + dy * (ny - 1));
-      h.nx = nx; h.ny = ny; h.dx = dx; h.dy = dy; h.lo1 = lo1; h.la1 = la1;
-    }
-    return h;
-  }
-  let arr = Array.isArray(raw) ? raw : (raw.data || []);
-  return arr.map(field => {
-    field.header = ensureBounds(field.header);
-    if (flipDyPositive && field.header.dy > 0) {
-      const {nx, ny} = field.header;
-      const newData = new Float32Array(field.data.length);
-      for (let y = 0; y < ny; y++) {
-        for (let x = 0; x < nx; x++) newData[y * nx + x] = field.data[(ny - 1 - y) * nx + x];
-      }
-      field.data = newData;
-      const oldLa1 = field.header.la1;
-      field.header.la1 = field.header.la2; field.header.la2 = oldLa1;
-      field.header.dy = -field.header.dy;
-    }
-    return field;
+<script>
+/* ------------------------------------------------------------
+   1) Map
+------------------------------------------------------------ */
+const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
+
+/* ------------------------------------------------------------
+   Story START button (temporary: opens your Google Sheet in a new tab)
+------------------------------------------------------------ */
+const STORY_SHEET_URL = "https://docs.google.com/spreadsheets/d/17Hzg7R2fSHJGbOKAKMqG4QAqA1GlSJwFM-SQwPhQObY/edit?gid=0#gid=0";
+const beginBtn = document.getElementById("beginStoryBtn");
+if (beginBtn){
+  beginBtn.addEventListener("click", () => window.open(STORY_SHEET_URL, "_blank"));
+}
+
+
+const osm = L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+  { attribution: "© OpenStreetMap © CARTO", subdomains:"abcd", maxZoom: 19 }
+).addTo(map);
+
+// --- MODIS True Color (NASA GIBS) ---
+// Uses GIBS WMTS REST pattern adapted as XYZ tiles:
+// https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/{Layer}/default/{YYYY-MM-DD}/{TileMatrixSet}/{z}/{y}/{x}.jpg
+function ymd(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  return `${Y}-${M}-${D}`;
+}
+function modisUrlForDate(d){
+  const day = ymd(d);
+  return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${day}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`;
+}
+const modis = L.tileLayer(modisUrlForDate(new Date(Date.UTC(2018,3,14,0,0,0))), {
+  attribution: "NASA GIBS",
+  maxZoom: 9,
+  opacity: 0.70
+});
+// (Not added by default; turn it on via the Layers control)
+
+// Optional label tiles (Carto light labels)
+const labels = L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
+  { attribution: "", subdomains:"abcd", maxZoom: 19, pane: "overlayPane" }
+);
+
+// --- Extra Midwest city labels (shows more as you zoom in) ---
+const cityLabelLayer = L.layerGroup().addTo(map);
+
+function makeCityLabel(name, lat, lon){
+  return L.marker([lat,lon], {
+    interactive: false,
+    icon: L.divIcon({
+      className: "town-label",
+      html: name,
+      iconSize: null
+    })
   });
 }
 
-/* --- 3) Jet Stream Logic (FORCED GLOBAL BOUNDS FIX) --- */
+const CITIES_TIER1 = [
+  ["Sioux Falls", 43.5446, -96.7311],
+  ["Omaha", 41.2565, -95.9345],
+  ["Minneapolis", 44.9778, -93.265],
+  ["Des Moines", 41.5868, -93.625],
+  ["Denver", 39.7392, -104.9903],
+  ["Kansas City", 39.0997, -94.5786],
+  ["Chicago", 41.8781, -87.6298]
+];
+
+const CITIES_TIER2 = [
+  ["Rapid City", 44.0805, -103.231],
+  ["Pierre", 44.3683, -100.351],
+  ["Fargo", 46.8772, -96.7898],
+  ["Bismarck", 46.8083, -100.7837],
+  ["Lincoln", 40.8136, -96.7026],
+  ["North Platte", 41.1403, -100.7601],
+  ["Rochester", 44.0121, -92.4802],
+  ["Madison", 43.0731, -89.4012],
+  ["Milwaukee", 43.0389, -87.9065],
+  ["St. Louis", 38.627, -90.1994],
+  ["Cheyenne", 41.14, -104.8202],
+  ["Billings", 45.7833, -108.5007],
+  ["Wichita", 37.6872, -97.3301]
+];
+
+const CITIES_TIER3 = [
+  ["Brookings", 44.3114, -96.7984],
+  ["Watertown", 44.8994, -97.115],
+  ["Aberdeen", 45.4647, -98.4865],
+  ["Huron", 44.3633, -98.2143],
+  ["Grand Island", 40.9264, -98.342],
+  ["Norfolk", 42.028, -97.417],
+  ["Scottsbluff", 41.8666, -103.6672],
+  ["Duluth", 46.7867, -92.1005],
+  ["Topeka", 39.0473, -95.6752],
+  ["Casper", 42.8501, -106.3252],
+  ["Bozeman", 45.6769, -111.0429],
+  ["Springfield", 37.2089, -93.2923]
+];
+
+function updateCityLabels(){
+  const z = map.getZoom();
+  
+  // --- Declutter strategy ---
+  // - Use our custom white-bubble labels at mid zooms
+  // - Switch to built-in map labels only when zoomed in far enough
+  if (z >= 9) {
+    if (!map.hasLayer(labels)) labels.addTo(map);
+    if (map.hasLayer(cityLabelLayer)) map.removeLayer(cityLabelLayer);
+  } else {
+    if (map.hasLayer(labels)) map.removeLayer(labels);
+    if (!map.hasLayer(cityLabelLayer)) cityLabelLayer.addTo(map);
+  }
+
+  cityLabelLayer.clearLayers();
+
+  if (z < 4) { return; }
+
+  if (z >= 4){
+    CITIES_TIER1.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
+  }
+  if (z >= 6){
+    CITIES_TIER2.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
+  }
+  if (z >= 7){
+    CITIES_TIER3.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
+  }
+}
+map.on("zoomend", updateCityLabels);
+updateCityLabels();
+
+map.attributionControl.setPrefix(false);
+
+const statusEl = document.getElementById("status");
+function setStatus(msg){ if (statusEl) statusEl.textContent = msg; }
+
+/* ------------------------------------------------------------
+   2) Time controls (METAR + Alerts)
+------------------------------------------------------------ */
+let current = new Date(Date.UTC(2018, 3, 14, 15, 0, 0)); // default (will snap to timeline)
+const stepHours = 3;
+
+// Alerts timeline index (optional, but recommended)
+let ALERTS_TIMELINE = null; // array of {t, file, count}
+let ALERTS_MIN = null;
+let ALERTS_MAX = null;
+
+function parseISOZ(s){
+  // '2018-04-12T00:00:00Z' -> Date
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+async function loadAlertsTimelineIndex(){
+  try {
+    const r = await fetch('./timeline_index.json', { cache:'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const idx = await r.json();
+    if (!Array.isArray(idx) || !idx.length) throw new Error('empty index');
+    ALERTS_TIMELINE = idx
+      .map(x => ({...x, _d: parseISOZ(x.t)}))
+      .filter(x => x._d);
+    ALERTS_TIMELINE.sort((a,b)=>a._d-b._d);
+    ALERTS_MIN = ALERTS_TIMELINE[0]._d;
+    ALERTS_MAX = ALERTS_TIMELINE[ALERTS_TIMELINE.length-1]._d;
+  } catch(e){
+    // Not fatal: we'll fall back to the old per-hour filenames
+    console.warn('No timeline_index.json found or unreadable:', e.message);
+    ALERTS_TIMELINE = null;
+    ALERTS_MIN = null;
+    ALERTS_MAX = null;
+  }
+}
+
+function snapCurrentToAlertsTimeline(){
+  if (!ALERTS_TIMELINE || !ALERTS_TIMELINE.length) return null;
+  // clamp
+  if (current < ALERTS_MIN) current = new Date(ALERTS_MIN.getTime());
+  if (current > ALERTS_MAX) current = new Date(ALERTS_MAX.getTime());
+  // nearest
+  let best = ALERTS_TIMELINE[0];
+  let bestDt = Math.abs(current - best._d);
+  for (let i=1;i<ALERTS_TIMELINE.length;i++){
+    const it = ALERTS_TIMELINE[i];
+    const dt = Math.abs(current - it._d);
+    if (dt < bestDt){ best = it; bestDt = dt; }
+  }
+  // snap label/time to the actual frame time to avoid confusing 'out of range' times
+  current = new Date(best._d.getTime());
+  return best;
+}
+
+
+function fmtZ(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `${Y}-${M}-${D} ${H}Z`;
+}
+function toISOZ(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `${Y}-${M}-${D}T${H}:00:00Z`;
+}
+
+function formatCentralLabel(dUtc) {
+  // Display in "Central time" without DST complexity for students.
+  // April is technically CDT, but we keep a fixed -5 hour offset for clarity.
+  const central = new Date(dUtc.getTime() - 5*3600*1000); // UTC -> Central (approx)
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const m = months[central.getUTCMonth()];
+  const day = central.getUTCDate();
+  const year = central.getUTCFullYear();
+  let hr = central.getUTCHours();
+  const ampm = hr >= 12 ? "PM" : "AM";
+  hr = hr % 12; if (hr === 0) hr = 12;
+  return `${m} ${day}, ${year} ${hr}${ampm}`;
+}
+
+function updateTimeLabel(){
+  const bt = document.getElementById("bannerTimeLabel");
+  if (bt) bt.textContent = formatCentralLabel(current);
+}
+
+// Banner time slider (WeatherBell-style)
+// - If alerts timeline_index.json exists, we use its times.
+// - Otherwise we fall back to a simple 3-hour timeline for Apr 13–16.
+let TIMELINE = [];
+const timeSlider = document.getElementById("timeSlider");
+let sliderTimer = null;
+
+// Initialize banner label + timeline AFTER slider vars exist (prevents TDZ errors)
+updateTimeLabel();
+rebuildTimelineFromIndex();
+
+// Try to load alerts timeline index (if present in repo)
+loadAlertsTimelineIndex().then(()=>{
+  snapCurrentToAlertsTimeline();
+  updateTimeLabel();
+  rebuildTimelineFromIndex();
+});
+function buildFallbackTimeline(){
+  const out = [];
+  const start = new Date(Date.UTC(2018,3,13,0,0,0));
+  const end   = new Date(Date.UTC(2018,3,16,0,0,0));
+  for (let t = start.getTime(); t <= end.getTime(); t += stepHours*3600*1000){
+    out.push(new Date(t));
+  }
+  return out;
+}
+
+function rebuildTimelineFromIndex(){
+  if (ALERTS_TIMELINE && ALERTS_TIMELINE.length){
+    TIMELINE = ALERTS_TIMELINE.map(x => new Date(x._d.getTime()));
+  } else {
+    TIMELINE = buildFallbackTimeline();
+  }
+  if (timeSlider){
+    timeSlider.min = 0;
+    timeSlider.max = Math.max(0, TIMELINE.length - 1);
+    syncSliderToCurrent();
+  }
+}
+
+function nearestTimelineIndex(d){
+  if (!TIMELINE.length) return 0;
+  let bestI = 0;
+  let bestDt = Math.abs(d - TIMELINE[0]);
+  for (let i=1;i<TIMELINE.length;i++){
+    const dt = Math.abs(d - TIMELINE[i]);
+    if (dt < bestDt){ bestDt = dt; bestI = i; }
+  }
+  return bestI;
+}
+
+function syncSliderToCurrent(){
+  if (!timeSlider || !TIMELINE.length) return;
+  timeSlider.value = String(nearestTimelineIndex(current));
+}
+
+function setCurrentFromSlider(doRefresh){
+  if (!timeSlider || !TIMELINE.length) return;
+  const idx = Math.max(0, Math.min(TIMELINE.length-1, Number(timeSlider.value)));
+  current = new Date(TIMELINE[idx].getTime());
+  snapCurrentToAlertsTimeline();
+  updateTimeLabel();
+  if (doRefresh){
+    // simple debounce so drag doesn't spam requests
+    if (sliderTimer) clearTimeout(sliderTimer);
+    sliderTimer = setTimeout(()=>refreshAll(), 250);
+  }
+}
+
+if (timeSlider){
+  timeSlider.addEventListener("input", ()=>setCurrentFromSlider(true));
+}
+
+
+async function stepTime(deltaHours){
+  current = new Date(current.getTime() + deltaHours*3600*1000);
+  snapCurrentToAlertsTimeline();
+  updateTimeLabel();
+  syncSliderToCurrent();
+  await refreshAll();
+}
+
+// Banner time buttons (master controls)
+const backBtnBanner = document.getElementById("backBtnBanner");
+const fwdBtnBanner  = document.getElementById("fwdBtnBanner");
+if (backBtnBanner) backBtnBanner.onclick = () => stepTime(-stepHours);
+if (fwdBtnBanner)  fwdBtnBanner.onclick  = () => stepTime(+stepHours);
+
+// Banner zoom buttons
+const zoomOutBtnBanner = document.getElementById("zoomOutBtnBanner");
+const zoomInBtnBanner  = document.getElementById("zoomInBtnBanner");
+if (zoomOutBtnBanner) zoomOutBtnBanner.onclick = () => map.zoomOut();
+if (zoomInBtnBanner)  zoomInBtnBanner.onclick  = () => map.zoomIn();
+
+// Opacity slider currently controls MODIS (and can later control radar overlays too)
+const opacitySlider = document.getElementById("radarOpacity");
+function setRasterOpacityFromSlider(){
+  if (!opacitySlider) return;
+  const o = Math.max(0, Math.min(1, Number(opacitySlider.value)/100));
+  if (modis) modis.setOpacity(o);
+}
+if (opacitySlider){
+  opacitySlider.addEventListener("input", setRasterOpacityFromSlider);
+  setRasterOpacityFromSlider();
+}
+
+
+/* ------------------------------------------------------------
+   3) Particles day (currently fixed)
+------------------------------------------------------------ */
+let particleDay = 14; // 13, 14, 15 (change here if needed)
+
+/* ------------------------------------------------------------
+   4) Layers
+------------------------------------------------------------ */
+const tempLayer = L.layerGroup().addTo(map);
+const dewLayer  = L.layerGroup();
+const windNumLayer = L.layerGroup();
+const windArrowLayer = L.layerGroup();
+const gustLayer = L.layerGroup();
+const visLayer  = L.layerGroup();
+const presLayer = L.layerGroup();
+const wxLayer   = L.layerGroup();
+
+// Alerts
+const alertsLayer = L.geoJSON(null);
+
+// Particles: placeholder for checkbox + actual velocity layer
+const particlesToggle = L.layerGroup();
+let particlesLayer = null;
+
+// Jet stream (250mb) velocity particles (Leaflet-Velocity)
 const jetToggle = L.layerGroup();
 let jetLayer = null;
 
-async function refreshJetIfOn(){
-  if (!map.hasLayer(jetToggle)) return;
-  const url = "./jetstream/era5_wind_250hPa_20180410_12z_mercator.json";
-  try {
-    const r = await fetch(url, { cache: "no-store" });
-    const raw = await r.json();
-    const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
-    
-    // FORCING GLOBAL BOUNDS to fix the "sliver" issue
-    velData.forEach(field => {
-      field.header.la1 = 90; field.header.la2 = -90;
-      field.header.lo1 = 0;  field.header.lo2 = 360;
-    });
+L.control.layers(
+  { "OpenStreetMap": osm, "MODIS True Color (Terra)": modis },
+  {
+    "Temperature (°F)": tempLayer,
+    "Dew Point (°F)": dewLayer,
+    "Wind Speed (mph)": windNumLayer,
+    "Wind Arrows": windArrowLayer,
+    "Wind Gusts (mph)": gustLayer,
+    "Visibility (mi)": visLayer,
+    "Pressure (trend)": presLayer,
+    "Weather Codes": wxLayer,
+    "Alerts (WWA)": alertsLayer,
+    "Daily wind particles": particlesToggle,
+     "Jet stream (250mb) particles": jetToggle
+  },
+  { collapsed:false }
+).addTo(map);
 
-    if (jetLayer) map.removeLayer(jetLayer);
-    jetLayer = L.velocityLayer({
-      displayValues: true,
-      displayOptions: { velocityType: "250mb Wind", position: "bottomleft" },
-      data: velData,
-      maxVelocity: 160, velocityScale: 0.006, particleMultiplier: 1/850, lineWidth: 2, opacity: 0.9
-    });
-    jetLayer.addTo(map);
-  } catch(e) { console.error("Jet stream failed:", e); }
+/* ------------------------------------------------------------
+   5) Collision thinning (drop stations if overlapping)
+------------------------------------------------------------ */
+class CollisionIndex {
+  constructor(cellSizePx){
+    this.cell = cellSizePx;
+    this.grid = new Map();
+  }
+  _key(cx, cy){ return `${cx},${cy}`; }
+  _cellOf(p){ return [Math.floor(p.x / this.cell), Math.floor(p.y / this.cell)]; }
+  canPlace(p, minSepPx){
+    const [cx, cy] = this._cellOf(p);
+    const r2 = minSepPx * minSepPx;
+    for (let dx=-1; dx<=1; dx++){
+      for (let dy=-1; dy<=1; dy++){
+        const key = this._key(cx+dx, cy+dy);
+        const arr = this.grid.get(key);
+        if (!arr) continue;
+        for (const q of arr){
+          const ddx = p.x - q.x;
+          const ddy = p.y - q.y;
+          if ((ddx*ddx + ddy*ddy) < r2) return false;
+        }
+      }
+    }
+    const key = this._key(cx, cy);
+    if (!this.grid.has(key)) this.grid.set(key, []);
+    this.grid.get(key).push({x:p.x, y:p.y});
+    return true;
+  }
 }
 
-/* --- 4) Solar & Weather Math (Day/Night Icons) --- */
+function minSepForZoom(z){
+  // Fallback step function (used if dynamic cannot compute bounds)
+  if (z <= 4) return 92;   // very wide
+  if (z === 5) return 70;  // wide
+  if (z === 6) return 46;  // starting to fill in
+  if (z === 7) return 22;  // SD-ish view: mostly filled in
+  return 0;                // z >= 8 show all
+}
+
+function dynamicMinSep(){
+  // More robust thinning:
+  // - Use zoom AND the current viewport span (degrees).
+  // - When the view is "state-sized" (like SD filling the screen), show essentially all stations.
+  try{
+    const z = map.getZoom();
+    const b = map.getBounds();
+    const spanLon = Math.abs(b.getEast() - b.getWest());
+    const spanLat = Math.abs(b.getNorth() - b.getSouth());
+    const span = Math.max(spanLon, spanLat);
+
+    // If the current view is roughly state-sized (or tighter), let stations fill in.
+    if (span <= 7.5) return 0;
+
+    return minSepForZoom(z);
+  }catch(e){
+    return minSepForZoom(map.getZoom());
+  }
+}
+
+function allowByCollision(index, lat, lon, minSepPx){
+  if (minSepPx <= 0) return true;
+  const p = map.latLngToLayerPoint([lat, lon]);
+  return index.canPlace(p, minSepPx);
+}
+/* ------------------------------------------------------------
+   6) Color ramps
+------------------------------------------------------------ */
+function piecewiseColor(x, stops){
+  if (x == null || !Number.isFinite(x)) return "rgb(255,255,255)";
+  if (x <= stops[0].v) return `rgb(${stops[0].c.join(",")})`;
+  if (x >= stops[stops.length-1].v) return `rgb(${stops[stops.length-1].c.join(",")})`;
+  for (let i=0; i<stops.length-1; i++){
+    const a = stops[i], b = stops[i+1];
+    if (x >= a.v && x <= b.v){
+      const k = (x - a.v) / (b.v - a.v);
+      const r = Math.round(a.c[0] + (b.c[0]-a.c[0]) * k);
+      const g = Math.round(a.c[1] + (b.c[1]-a.c[1]) * k);
+      const bb= Math.round(a.c[2] + (b.c[2]-a.c[2]) * k);
+      return `rgb(${r},${g},${bb})`;
+    }
+  }
+  return "rgb(255,255,255)";
+}
+
+function tempColorF(t){
+  return piecewiseColor(t, [
+    {v: 10, c: [170, 220, 255]},
+    {v: 20, c: [120, 190, 255]},
+    {v: 30, c: [0, 70, 200]},
+    {v: 40, c: [0, 170, 0]},
+    {v: 50, c: [150, 255, 150]},
+    {v: 60, c: [255, 235, 0]},
+    {v: 70, c: [255, 140, 0]},
+    {v: 85, c: [255, 80, 0]}
+  ]);
+}
+
+function dewColorF(td){
+  return piecewiseColor(td, [
+    {v: 10, c: [90, 55, 20]},
+    {v: 20, c: [140, 95, 40]},
+    {v: 30, c: [200, 160, 110]},
+    {v: 50, c: [190, 200, 140]},
+    {v: 60, c: [0, 170, 0]},
+    {v: 70, c: [0, 90, 0]}
+  ]);
+}
+
+function windColorMph(spd){
+  return piecewiseColor(spd, [
+    {v: 0,  c: [0, 40, 160]},
+    {v: 10, c: [0, 120, 255]},
+    {v: 20, c: [0, 210, 180]},
+    {v: 35, c: [255, 220, 0]},
+    {v: 50, c: [255, 120, 0]},
+    {v: 70, c: [255, 80, 0]}
+  ]);
+}
+
+function pressureTrendColor(deltaInHg){
+  if (deltaInHg == null || !Number.isFinite(deltaInHg)) return "rgb(248,248,248)";
+  if (deltaInHg > 0.02)  return "rgb(215,245,215)";
+  if (deltaInHg < -0.02) return "rgb(255,220,220)";
+  return "rgb(240,240,240)";
+}
+
+function visStyle(vis){
+  if (vis == null || !Number.isFinite(vis)) {
+    return { bg:"rgba(255,255,255,0.65)", border:"#333" };
+  }
+  const v = Math.max(0, Math.min(10, vis));
+  const alpha = 1 - (v / 10);
+  const border = (v < 1) ? "#666" : "#333";
+  return { bg:`rgba(255,255,255,${alpha.toFixed(3)})`, border };
+}
+
+/* ------------------------------------------------------------
+   7) Icons
+------------------------------------------------------------ */
+function dotIcon(txt, fill, size=28, fontSize=12, borderColor="#333"){
+  return L.divIcon({
+    className:"",
+    html:`<div class="dot"
+              style="width:${size}px;height:${size}px;
+                     background:${fill};
+                     border-color:${borderColor};
+                     font-size:${fontSize}px;">${txt}</div>`,
+    iconSize:[size,size],
+    iconAnchor:[size/2,size/2]
+  });
+}
+
+/* Wind arrow as inline SVG divIcon */
+
+/* ------------------------------------------------------------
+   7b) Sun position (simple) + Weather icon mapping
+   - Used for "clear" day vs night so we don't show a sun at night.
+------------------------------------------------------------ */
 function julianDayUTC(d){
-  const Y = d.getUTCFullYear(); const M = d.getUTCMonth() + 1; const D = d.getUTCDate();
-  const H = d.getUTCHours() + d.getUTCMinutes()/60;
-  let y = Y, m = M; if (m <= 2){ y -= 1; m += 12; }
-  const A = Math.floor(y/100); const B = 2 - A + Math.floor(A/4);
-  return Math.floor(365.25*(y+4716)) + Math.floor(30.6001*(m+1)) + D + B - 1524.5 + H/24;
+  // d is a JS Date (UTC assumed)
+  const Y = d.getUTCFullYear();
+  const M = d.getUTCMonth() + 1;
+  const D = d.getUTCDate();
+  const H = d.getUTCHours() + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600;
+  let y = Y, m = M;
+  if (m <= 2){ y -= 1; m += 12; }
+  const A = Math.floor(y/100);
+  const B = 2 - A + Math.floor(A/4);
+  const JD0 = Math.floor(365.25*(y+4716)) + Math.floor(30.6001*(m+1)) + D + B - 1524.5;
+  return JD0 + H/24;
+}
+
+function solarElevationDeg(lat, lon, dUtc){
+  // Approx solar elevation (degrees) using common NOAA-style math.
+  // lat, lon in degrees (lon positive east; here we use west-negative which is fine).
+  const rad = Math.PI/180;
+  const JD = julianDayUTC(dUtc);
+  const T = (JD - 2451545.0) / 36525.0;
+
+  // Sun geom mean longitude + anomaly
+  let L0 = 280.46646 + T*(36000.76983 + T*0.0003032);
+  L0 = ((L0 % 360) + 360) % 360;
+  const M = 357.52911 + T*(35999.05029 - 0.0001537*T);
+
+  // Eccentricity
+  const e = 0.016708634 - T*(0.000042037 + 0.0000001267*T);
+
+  // Sun equation of center
+  const C = (1.914602 - T*(0.004817 + 0.000014*T))*Math.sin(M*rad)
+          + (0.019993 - 0.000101*T)*Math.sin(2*M*rad)
+          + 0.000289*Math.sin(3*M*rad);
+
+  // True longitude
+  const trueLong = L0 + C;
+
+  // Apparent longitude
+  const omega = 125.04 - 1934.136*T;
+  const lambda = trueLong - 0.00569 - 0.00478*Math.sin(omega*rad);
+
+  // Mean obliquity + corrected obliquity
+  const eps0 = 23 + (26 + ((21.448 - T*(46.815 + T*(0.00059 - T*0.001813))))/60)/60;
+  const eps = eps0 + 0.00256*Math.cos(omega*rad);
+
+  // Declination
+  const sinDec = Math.sin(eps*rad) * Math.sin(lambda*rad);
+  const dec = Math.asin(sinDec);
+
+  // Equation of time (minutes)
+  const y = Math.tan((eps*rad)/2); 
+  const y2 = y*y;
+
+  const sin2L0 = Math.sin(2*L0*rad);
+  const sinM  = Math.sin(M*rad);
+  const cos2L0 = Math.cos(2*L0*rad);
+  const sin4L0 = Math.sin(4*L0*rad);
+  const sin2M = Math.sin(2*M*rad);
+
+  const Etime = 4 * (y2*sin2L0 - 2*e*sinM + 4*e*y2*sinM*cos2L0 - 0.5*y2*y2*sin4L0 - 1.25*e*e*sin2M) * 180/Math.PI;
+
+  // True solar time (minutes)
+  const mins = dUtc.getUTCHours()*60 + dUtc.getUTCMinutes() + dUtc.getUTCSeconds()/60;
+  const tst = (mins + Etime + 4*lon) % 1440;
+
+  // Hour angle
+  let ha = (tst/4 < 0) ? (tst/4 + 180) : (tst/4 - 180);
+  ha = ha * rad;
+
+  const latR = lat * rad;
+  const cosZen = Math.sin(latR)*Math.sin(dec) + Math.cos(latR)*Math.cos(dec)*Math.cos(ha);
+  const zen = Math.acos(Math.max(-1, Math.min(1, cosZen)));
+  const elev = 90 - zen / rad;
+  return elev;
 }
 
 function isDaylightAt(lat, lon, dUtc){
-  const rad = Math.PI/180; const JD = julianDayUTC(dUtc);
-  const T = (JD - 2451545.0) / 36525.0;
-  let L0 = 280.46646 + T*(36000.76983); L0 = ((L0 % 360) + 360) % 360;
-  const M = 357.52911 + T*(35999.05029);
-  const dec = Math.asin(Math.sin(23.439*rad) * Math.sin((L0 + 1.915*Math.sin(M*rad))*rad));
-  const mins = dUtc.getUTCHours()*60 + dUtc.getUTCMinutes() + 4*lon;
-  const ha = ((mins % 1440)/4 - 180) * rad;
-  const elev = 90 - Math.acos(Math.sin(lat*rad)*Math.sin(dec) + Math.cos(lat*rad)*Math.cos(dec)*Math.cos(ha)) / rad;
-  return elev > 0;
+  return solarElevationDeg(lat, lon, dUtc) > 0;
 }
 
-/* --- 5) Master Refresh & UI --- */
-const tempLayer = L.layerGroup().addTo(map);
-const alertsLayer = L.geoJSON(null);
-const windArrowLayer = L.layerGroup();
-const wxLayer = L.layerGroup();
+function normalizeWxCode(s){
+  return (s || "").toUpperCase().replace(/\s+/g, " ").trim();
+}
 
-L.control.layers(null, {
-  "Temperature (°F)": tempLayer,
-  "Wind Arrows": windArrowLayer,
-  "Weather Icons": wxLayer,
-  "Alerts (WWA)": alertsLayer,
-  "Jet stream particles": jetToggle
-}, { collapsed: false }).addTo(map);
+function pickWxEmoji(wxcodes, isDay){
+  // Priority-based parsing. Works even if multiple codes exist ("-SN BR").
+  const wx = normalizeWxCode(wxcodes);
 
-map.on("overlayadd", e => { if (e.layer === jetToggle) refreshJetIfOn(); });
+  // If no codes, treat as "clear/none"
+  if (!wx) return isDay ? "☀️" : "🌙";
 
-document.getElementById("beginStoryBtn").onclick = () => window.open("https://docs.google.com/spreadsheets/d/17Hzg7R2fSHJGbOKAKMqG4QAqA1GlSJwFM-SQwPhQObY/edit?gid=0#gid=0");
-document.getElementById("zoomInBtnBanner").onclick = () => map.zoomIn();
-document.getElementById("zoomOutBtnBanner").onclick = () => map.zoomOut();
+  // Thunder first
+  if (wx.includes("TS")) return "⛈️";
+
+  // Freezing rain / ice pellets
+  if (wx.includes("FZRA") || wx.includes("PL") || wx.includes("IC")) return "🧊";
+
+  // Snow / sleet / snow grains
+  if (wx.includes("SN") || wx.includes("SG")) return "🌨️";
+
+  // Rain / drizzle
+  if (wx.includes("RA") || wx.includes("DZ")) return "🌧️";
+
+  // Fog / mist / haze / smoke / blowing dust
+  if (wx.includes("FG") || wx.includes("BR") || wx.includes("HZ") || wx.includes("FU") || wx.includes("DU")) return "🌫️";
+
+  // Showers
+  if (wx.includes("SH")) return "🌦️";
+
+  // Default: cloud (unknown or other)
+  return "☁️";
+}
+
+function wxEmojiIcon(wxcodes, isDay, size=30){
+  const emoji = pickWxEmoji(wxcodes, isDay);
+  // Slightly larger emoji for readability; keep the circle consistent.
+  return L.divIcon({
+    className:"",
+    html:`<div class="dot"
+              style="width:${size}px;height:${size}px;
+                     background:rgba(255,255,255,0.92);
+                     border-color:#999;
+                     font-size:${Math.round(size*0.62)}px;
+                     line-height:1;">${emoji}</div>`,
+    iconSize:[size,size],
+    iconAnchor:[size/2,size/2]
+  });
+}
+function windArrowIcon(bearingDeg, mph){
+  const spd = (mph == null || !Number.isFinite(mph)) ? 0 : mph;
+  const color = windColorMph(spd);
+
+  const Lmin = 14, Lmax = 52;
+  const len = Math.max(Lmin, Math.min(Lmax, Lmin + spd * 0.65));
+
+  const w = 60, h = 60;
+  const cx = w/2, cy = h/2;
+
+  const svg = `
+    <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+      <g transform="translate(${cx},${cy})">
+        <line x1="0" y1="${len/2}" x2="0" y2="${-len/2}" stroke="${color}" stroke-width="4" stroke-linecap="round"/>
+        <polygon points="0,${-len/2-8} -8,${-len/2+6} 8,${-len/2+6}" fill="${color}"/>
+      </g>
+    </svg>
+  `;
+
+  return L.divIcon({
+    className:"",
+    html:`<div style="width:${w}px;height:${h}px;transform:rotate(${bearingDeg}deg);">
+            ${svg}
+          </div>`,
+    iconSize:[w,h],
+    iconAnchor:[w/2,h/2]
+  });
+}
+
+/* ------------------------------------------------------------
+   8) Helpers
+------------------------------------------------------------ */
+function num(v){
+  const s = (v ?? "").toString().trim();
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+function ktToMph(kt){ return kt == null ? null : (kt * 1.15078); }
+
+function parseVisMiles(raw){
+  if (raw == null) return { miles:null, label:"" };
+  let s = String(raw).trim();
+  if (!s) return { miles:null, label:"" };
+
+  if (s.startsWith("M")) s = s.slice(1);
+  s = s.replace(/\s+/g, " ");
+
+  const n = Number(s);
+  if (Number.isFinite(n)) return { miles:n, label:formatVisLabel(n) };
+
+  const parts = s.split(" ");
+  let whole = 0;
+  let frac = null;
+
+  if (parts.length === 2){
+    whole = Number(parts[0]);
+    frac = parts[1];
+  } else {
+    frac = parts[0];
+  }
+
+  if (frac && frac.includes("/")){
+    const [a,b] = frac.split("/").map(Number);
+    if (Number.isFinite(a) && Number.isFinite(b) && b !== 0){
+      const val = (Number.isFinite(whole) ? whole : 0) + (a/b);
+      return { miles:val, label:formatVisLabel(val) };
+    }
+  }
+  return { miles:null, label:String(raw).trim() };
+}
+function formatVisLabel(x){
+  if (!Number.isFinite(x)) return "";
+  if (x >= 10) return "10+";
+
+  const denom = 8;
+  const whole = Math.floor(x);
+  const frac = x - whole;
+  const nume = Math.round(frac * denom);
+
+  if (nume === 0) return String(whole);
+  if (nume === denom) return String(whole + 1);
+
+  const gcd = (a,b)=>b?gcd(b,a%b):a;
+  const g = gcd(nume, denom);
+  const n = nume / g;
+  const d = denom / g;
+
+  if (whole === 0) return `${n}/${d}`;
+  return `${whole} ${n}/${d}`;
+}
+
+function popupHTML(r, dAlt){
+  const tmp = num(r.tmpf);
+  const dew = num(r.dwpf);
+  const drct = num(r.drct);
+  const sknt = num(r.sknt);
+  const gust = num(r.gust);
+  const alti = num(r.alti);
+
+  const mph  = sknt != null ? Math.round(ktToMph(sknt)) : "—";
+  const gmh  = gust != null ? Math.round(ktToMph(gust)) : "—";
+  const altTxt = alti != null ? alti.toFixed(2) : "—";
+  const dTxt = (dAlt == null) ? "—" : `${dAlt > 0 ? "+" : ""}${dAlt.toFixed(2)} in/3h`;
+
+  const visObj = parseVisMiles(r.vsby);
+  const visTxt = (visObj.label || r.vsby || "—");
+
+  const toDir = (drct != null) ? ((drct + 180) % 360) : null;
+
+  return `
+    <div style="font:600 13px/1.3 Arial,sans-serif">
+      <div style="font-size:14px;margin-bottom:4px"><b>${r.station || "Station"}</b></div>
+      <div style="opacity:.85;margin-bottom:6px">Valid: ${r.valid || ""} UTC</div>
+      <div>Temp: <b>${tmp == null ? "—" : Math.round(tmp)}</b> °F</div>
+      <div>Dew Pt: <b>${dew == null ? "—" : Math.round(dew)}</b> °F</div>
+      <div>Wind: <b>${mph}</b> mph (gust <b>${gmh}</b>)</div>
+      <div>Wind dir (FROM): <b>${drct == null ? "—" : drct.toFixed(0)}°</b></div>
+      <div>Arrow points (TO): <b>${toDir == null ? "—" : toDir.toFixed(0)}°</b></div>
+      <div>Vis: <b>${visTxt}</b> mi</div>
+      <div>Altimeter: <b>${altTxt}</b> inHg</div>
+      <div>Alt trend (3h): <b>${dTxt}</b></div>
+      <div>Wx: <b>${(r.wxcodes || "").trim() || "—"}</b></div>
+    </div>
+  `;
+}
+
+/* ------------------------------------------------------------
+   9) METAR fetch
+------------------------------------------------------------ */
+const reportType = 3;
+const SD_ONLY = ["SD_ASOS"];
+const REST = ["MN_ASOS","IA_ASOS","NE_ASOS","ND_ASOS","WI_ASOS","IL_ASOS","MI_ASOS","MT_ASOS","WY_ASOS","KS_ASOS","MO_ASOS","CO_ASOS"];
+
+function asosURL(d, networks){
+  const iso = toISOZ(d);
+  return "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
+    + "?data=tmpf&data=dwpf&data=drct&data=sknt&data=gust&data=vsby&data=alti&data=wxcodes"
+    + `&network=${encodeURIComponent(networks.join(","))}`
+    + `&report_type=${reportType}`
+    + "&latlon=yes&format=onlycomma&tz=UTC"
+    + `&sts=${encodeURIComponent(iso)}`
+    + `&ets=${encodeURIComponent(iso)}`
+    + "&missing=empty";
+}
+
+function parseCSV(text){
+  const lines = text.split(/\r?\n/).filter(l => l.trim() && !l.startsWith("#"));
+  if (lines.length < 2) return [];
+  const header = lines[0].split(",");
+  return lines.slice(1).map(line => {
+    const cols = line.split(",");
+    const obj = {};
+    header.forEach((h,i)=>obj[h]=cols[i] ?? "");
+    return obj;
+  });
+}
+
+async function fetchRows(d, networks){
+  const resp = await fetch(asosURL(d, networks), { cache:"no-store" });
+  if (!resp.ok) throw new Error(`METAR HTTP ${resp.status}`);
+  return parseCSV(await resp.text());
+}
+
+/* ------------------------------------------------------------
+   10) Alerts styling + LOADER (UPDATED for your new filenames)
+------------------------------------------------------------ */
+const NWS_EVENT_COLOR = {
+  // Severe / Flood (from NWS Hazards Map colors)
+  "Tornado Warning": "#FF0000",
+  "Severe Thunderstorm Warning": "#FFA500",
+  "Flash Flood Warning": "#8B0000",
+  "Flash Flood Watch": "#2E8B57",
+  "Flood Warning": "#00FF00",
+  "Flood Advisory": "#00FF7F",
+  "Flood Watch": "#2E8B57",
+
+  // Winter
+  "Blizzard Warning": "#FF4500",
+  "Winter Storm Warning": "#FF69B4",
+  "Winter Storm Watch": "#4682B4",
+  "Winter Weather Advisory": "#7B68EE",
+  "Ice Storm Warning": "#8B008B",
+  "Snow Squall Warning": "#C71585",
+
+  // Wind / Other
+  "High Wind Warning": "#DAA520",
+  "Wind Advisory": "#D2B48C",
+  "Dense Fog Advisory": "#708090"
+};
+
+function pickProp(p, keys){
+  if (!p) return "";
+  for (const k of keys){
+    if (p[k] != null && String(p[k]).trim() !== "") return String(p[k]).trim();
+    const kk = Object.keys(p).find(x => x.toLowerCase() === k.toLowerCase());
+    if (kk && p[kk] != null && String(p[kk]).trim() !== "") return String(p[kk]).trim();
+  }
+  return "";
+}
+
+function eventNameFromProps(p){
+  const e = pickProp(p, ["event","headline","name","title"]);
+  if (e) return e;
+
+  const phen = pickProp(p, ["phenomena","phenom","PHENOM","phen"]);
+  const sig  = pickProp(p, ["significance","sig","SIG"]);
+  if (phen && sig){
+    const key = `${phen}.${sig}`.toUpperCase();
+    // Common VTEC phenom.sig -> human name
+    const MAP = {
+      'BZ.W':'Blizzard Warning',
+      'WS.W':'Winter Storm Warning',
+      'WS.A':'Winter Storm Watch',
+      'WW.Y':'Winter Weather Advisory',
+      'ZR.Y':'Freezing Rain Advisory',
+      'IS.W':'Ice Storm Warning',
+      'SQ.W':'Snow Squall Warning',
+
+      'TO.W':'Tornado Warning',
+      'TO.A':'Tornado Watch',
+      'SV.W':'Severe Thunderstorm Warning',
+      'SV.A':'Severe Thunderstorm Watch',
+      'FF.W':'Flash Flood Warning',
+      'FF.A':'Flash Flood Watch',
+      'FA.W':'Flood Warning',
+      'FA.Y':'Flood Advisory',
+      'FL.W':'Flood Warning',
+      'FL.Y':'Flood Advisory',
+
+      'MA.W':'Marine Warning',
+      'GL.W':'Gale Warning',
+      'SR.W':'Storm Warning'
+    };
+    if (MAP[key]) return MAP[key];
+    return key;
+  }
+
+  const wfo = pickProp(p, ["WFO","wfo"]);
+  const etn = pickProp(p, ["ETN","etn"]);
+  return (wfo || etn) ? `Alert ${wfo || ""} ${etn || ""}`.trim() : "Alert";
+}
+
+function colorForAlertName(name){
+  if (NWS_EVENT_COLOR[name]) return NWS_EVENT_COLOR[name];
+  const lower = String(name).toLowerCase();
+  if (lower.includes("blizzard") && lower.includes("warning")) return NWS_EVENT_COLOR["Blizzard Warning"];
+  if (lower.includes("winter storm") && lower.includes("warning")) return NWS_EVENT_COLOR["Winter Storm Warning"];
+  if (lower.includes("winter storm") && lower.includes("watch")) return NWS_EVENT_COLOR["Winter Storm Watch"];
+  if (lower.includes('winter weather') && lower.includes('advisory')) return NWS_EVENT_COLOR['Winter Weather Advisory'];
+  if (lower.includes('tornado') && lower.includes('warning')) return NWS_EVENT_COLOR['Tornado Warning'];
+  if (lower.includes('tornado') && lower.includes('watch')) return NWS_EVENT_COLOR['Tornado Watch'];
+  if (lower.includes('severe thunderstorm') && lower.includes('warning')) return NWS_EVENT_COLOR['Severe Thunderstorm Warning'];
+  if (lower.includes('severe thunderstorm') && lower.includes('watch')) return NWS_EVENT_COLOR['Severe Thunderstorm Watch'];
+  if (lower.includes('flash flood') && lower.includes('warning')) return NWS_EVENT_COLOR['Flash Flood Warning'];
+  if (lower.includes('flash flood') && lower.includes('watch')) return NWS_EVENT_COLOR['Flash Flood Watch'];
+  if (lower == 'flood warning') return NWS_EVENT_COLOR['Flood Warning'];
+  if (lower == 'flood advisory') return NWS_EVENT_COLOR['Flood Advisory'];
+  return '#CC0000'; // fallback
+
+}
+
+// NEW (your repo): alerts_20180414_0000Z.geojson
+function alertsFileCompactHourly(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `./alerts_${Y}${M}${D}_${H}00Z.geojson`;
+}
+
+// OLD (your repo): alerts_2018-04-14T21Z.geojson
+function alertsFileOldDash(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `./alerts_${Y}-${M}-${D}T${H}Z.geojson`;
+}
+
+// Extra fallback (sometimes people store T2100Z)
+function alertsFileOldWithMinutes(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `./alerts_${Y}-${M}-${D}T${H}00Z.geojson`;
+}
+
+async function fetchFirstOk(urls){
+  let lastErr = "";
+  for (const u of urls){
+    try{
+      const r = await fetch(u, { cache:"no-store" });
+      if (!r.ok) { lastErr = `HTTP ${r.status}`; continue; }
+      const gj = await r.json();
+      return { url: u, gj };
+    } catch(e){
+      lastErr = e.message || String(e);
+    }
+  }
+  throw new Error(lastErr || "No alert file matched");
+}
+
+async function loadAlerts(){
+  if (!map.hasLayer(alertsLayer)) return;
+
+  // If you have a timeline_index.json + timeline_hourly/*.geojson, use it.
+  const snapped = snapCurrentToAlertsTimeline();
+
+  let candidates = [];
+  if (snapped && snapped.file){
+    candidates = [ './' + snapped.file.replace(/^\.\//, '') ];
+  } else {
+    // Backward compatibility: try legacy naming patterns
+    candidates = [
+      alertsFileCompactHourly(current),
+      alertsFileOldDash(current),
+      alertsFileOldWithMinutes(current)
+    ];
+  }
+
+  try{
+    const { url, gj } = await fetchFirstOk(candidates);
+
+    alertsLayer.clearLayers();
+
+    let polyCount = 0;
+    L.geoJSON(gj, {
+      style: (feat) => {
+        const p = feat.properties || {};
+        const name = eventNameFromProps(p);
+        const c = colorForAlertName(name);
+        return { weight:2, color:c, fillColor:c, fillOpacity:0.18 };
+      },
+      onEachFeature: (feat, layer) => {
+        polyCount++;
+        const p = feat.properties || {};
+        const name = eventNameFromProps(p);
+        const c = colorForAlertName(name);
+
+        const wfo = pickProp(p, ['WFO','wfo']);
+        const etn = pickProp(p, ['ETN','etn']);
+        const status = pickProp(p, ['STATUS','status']);
+        const issued = pickProp(p, ['issuance','issued','onset','ISSUANCE','ISSUED','ISSUE']);
+        const expire = pickProp(p, ['expire','expires','end','EXPIRE','EXPIRES']);
+
+        const lines = [];
+        lines.push(`<div><span class="swatch" style="background:${c}"></span><b>${name}</b></div>`);
+        if (wfo || etn) lines.push(`Office/Event: <b>${wfo || '—'}</b> / <b>${etn || '—'}</b>`);
+        if (status) lines.push(`Status: <b>${status}</b>`);
+        if (issued) lines.push(`Issued: <b>${issued}</b>`);
+        if (expire) lines.push(`Expires: <b>${expire}</b>`);
+
+        layer.bindPopup(lines.join('<br>'));
+      }
+    }).eachLayer(l => alertsLayer.addLayer(l));
+
+    // Confirm which file loaded + how many polygons
+    const short = url.replace('./','');
+    setStatus(`Alerts loaded: ${short} | polygons: ${polyCount}`);
+
+  } catch(e){
+    console.warn('Alerts load failed:', e.message);
+    alertsLayer.clearLayers();
+    setStatus('Alerts not found for this hour (check filenames).');
+  }
+}
+
+/* ------------------------------------------------------------
+   11) Daily particles (toggle + day buttons)
+------------------------------------------------------------ */
+function particlesFileForDay(dayNum){
+  return `./wind_particles_201804${String(dayNum).padStart(2,"0")}.json`;
+}
+
+
+function normalizeVelocityJson(raw, opts={}){
+  // Accept:
+  // 1) Array of windy records [{header,data},{header,data}]
+  // 2) Wrapper {data:[...records...]}
+  // 3) Single record with interleaved u/v pairs in one record: data.length = nx*ny*2
+  //
+  // opts.flipDyPositive:
+  //   - If true, and header.dy > 0, we flip rows so la1 becomes NORTH-most and dy becomes negative.
+  const flipDyPositive = !!opts.flipDyPositive;
+
+  function ensureBounds(h){
+    if (!h) return h;
+    const nx = h.nx || h.Nx;
+    const ny = h.ny || h.Ny;
+    const dx = (h.dx ?? h.Dx);
+    const dy = (h.dy ?? h.Dy);
+    const lo1 = (h.lo1 ?? h.Lo1);
+    const la1 = (h.la1 ?? h.La1);
+    if (nx && ny && typeof dx==="number" && typeof dy==="number" && typeof lo1==="number" && typeof la1==="number"){
+      if (typeof h.lo2 !== "number" && typeof h.Lo2 !== "number") h.lo2 = lo1 + dx * (nx - 1);
+      if (typeof h.la2 !== "number" && typeof h.La2 !== "number") h.la2 = la1 + dy * (ny - 1);
+    }
+    return h;
+  }
+
+  let arr = raw;
+  if (raw && Array.isArray(raw.data)) arr = raw.data;
+  if (!Array.isArray(arr)) return arr;
+
+  function flipIfNeeded(field){
+    if (!flipDyPositive) return field;
+    if (!field || !field.header || !Array.isArray(field.data)) return field;
+
+    const h0 = field.header || {};
+    const h = ensureBounds(h0);
+    const nx = h.nx || h.Nx;
+    const ny = h.ny || h.Ny;
+    const dy = h.dy ?? h.Dy;
+    const la1 = h.la1 ?? h.La1;
+
+    if (!nx || !ny || typeof dy !== "number" || typeof la1 !== "number") return field;
+
+    // If dy > 0, the grid is SOUTH -> NORTH. Leaflet-velocity expects NORTH -> SOUTH.
+    if (dy > 0){
+      const out = new Array(nx * ny);
+      for (let y=0; y<ny; y++){
+        const srcRow = (ny - 1 - y) * nx;
+        const dstRow = y * nx;
+        for (let x=0; x<nx; x++){
+          out[dstRow + x] = field.data[srcRow + x];
+        }
+      }
+      field.data = out;
+      field.header = { ...h, la1: la1 + dy * (ny - 1), la2: la1, dy: -dy };
+    }
+    return field;
+  }
+
+  // Special case: single record with interleaved u/v pairs
+  if (arr.length === 1 && arr[0] && arr[0].header && Array.isArray(arr[0].data)){
+    const h = arr[0].header || {};
+    const nx = h.nx || h.Nx;
+    const ny = h.ny || h.Ny;
+    const d  = arr[0].data;
+
+    if (nx && ny && d.length === nx*ny*2){
+      const n = nx*ny;
+      const u = new Array(n);
+      const v = new Array(n);
+      for (let i=0, j=0; i<n; i++, j+=2){
+        u[i] = d[j];
+        v[i] = d[j+1];
+      }
+
+      // Add the header fields leaflet-velocity expects
+      const base = ensureBounds({ ...h });
+      // leaflet-velocity relies on lo2/la2 for extent calculations
+      const hu = { ...base, parameterCategory: 2, parameterNumber: 2, parameterNumberName: "eastward_wind", parameterUnit: "m/s" };
+      const hv = { ...base, parameterCategory: 2, parameterNumber: 3, parameterNumberName: "northward_wind", parameterUnit: "m/s" };
+
+      return [ flipIfNeeded({ header: hu, data: u }), flipIfNeeded({ header: hv, data: v }) ];
+    }
+  }
+
+  // Normal case: multiple fields (u + v)
+  return arr.map(rec => {
+    if (rec && rec.header) rec.header = ensureBounds(rec.header);
+    return flipIfNeeded(rec);
+  });
+}
+
+
+async function refreshParticlesIfOn(){
+  if (!map.hasLayer(particlesToggle)) return;
+
+  if (typeof L.velocityLayer !== "function"){
+    setStatus("Wind particles: leaflet-velocity did not load.");
+    return;
+  }
+
+  const url = particlesFileForDay(particleDay);
+
+  try{
+    const r = await fetch(url, { cache:"no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const raw = await r.json();
+    const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
+
+    if (particlesLayer){
+      try { map.removeLayer(particlesLayer); } catch(_) {}
+      particlesLayer = null;
+    }
+
+    particlesLayer = L.velocityLayer({
+      data: velData,
+      velocityScale: 0.01,
+      particleAge: 120,
+      particleMultiplier: 1/700,
+      lineWidth: 1.7,
+      colorScale: [
+        "rgb(0,40,160)",
+        "rgb(0,120,255)",
+        "rgb(0,210,180)",
+        "rgb(255,220,0)",
+        "rgb(255,120,0)"
+      ],
+      minVelocity: 0,
+      maxVelocity: 60,
+      displayValues: false
+    });
+
+    particlesLayer.addTo(map);
+    setStatus(`Particles loaded: ${url.replace("./","")}`);
+
+  } catch(e){
+    console.warn("Particles failed:", url, e.message);
+    setStatus(`Particles not found: ${url.replace("./","")}`);
+  }
+}
+
+async function refreshJetIfOn(){
+  if (!map.hasLayer(jetToggle)) return;
+
+  if (typeof L.velocityLayer !== "function"){
+    setStatus("Jet stream: leaflet-velocity did not load.");
+    return;
+  }
+
+  const JET_FILES = [
+    "era5_wind_250hPa_20180410_12z_mercator.json",
+    "era5_wind_250hPa_20180410_12z_mercator (1).json"
+  ];
+
+  // Prefer the clean filename, but fall back if needed.
+  let url = "./jetstream/" + encodeURI(JET_FILES[0]);
+
+  // Some hosts block HEAD; we try a fast existence check and fall back.
+  for (const f of JET_FILES){
+    const testUrl = "./jetstream/" + encodeURI(f);
+    try{
+      const head = await fetch(testUrl, { method:"HEAD", cache:"no-store" });
+      if (head.ok){ url = testUrl; break; }
+    }catch(_){ /* ignore */ }
+  }
+
+  try{
+    const r = await fetch(url, { cache:"no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+
+    const raw = await r.json();
+    const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
+
+    if (jetLayer){
+      try{ map.removeLayer(jetLayer); }catch(_){}
+      jetLayer = null;
+    }
+
+    jetLayer = L.velocityLayer({
+      data: velData,
+      displayValues: true,
+      displayOptions: {
+        velocityType: "250mb Wind",
+        displayPosition: "bottomleft",
+        displayEmptyString: "No wind data"
+      },
+      maxVelocity: 160,
+      velocityScale: 0.02,
+      particleAge: 90,
+      particleMultiplier: 1/900,
+      lineWidth: 1.6,
+      opacity: 0.90
+    });
+
+    jetLayer.addTo(map);
+    setStatus(`Jet stream loaded: ${url.replace("./","")}`);
+  }catch(e){
+    console.warn("Jet stream failed:", url, e.message);
+    setStatus(`Jet stream not found / not readable: ${url.replace("./","")}`);
+  }
+}
+
+/* Toggle handlers for particles + alerts + jet stream */
+map.on("overlayadd", async (e) => {
+  if (e.layer === particlesToggle) await refreshParticlesIfOn();
+  if (e.layer === jetToggle) await refreshJetIfOn();
+  if (e.layer === alertsLayer) await loadAlerts();
+});
+map.on("overlayremove", (e) => {
+  if (e.layer === particlesToggle && particlesLayer){
+    map.removeLayer(particlesLayer);
+    particlesLayer = null;
+  }
+  if (e.layer === jetToggle && jetLayer){
+    map.removeLayer(jetLayer);
+    jetLayer = null;
+  }
+});
+
+/* ------------------------------------------------------------
+   12) Main refresh (METAR + alerts + arrows)
+------------------------------------------------------------ */
+async function refreshAll(){
+  setStatus("Loading METARs…");
+
+  // Keep MODIS layer synced to the current map day (only if turned on)
+  try{ if (map.hasLayer(modis)) modis.setUrl(modisUrlForDate(current)); }catch(e){}
+
+  const prev = new Date(current.getTime() - stepHours*3600*1000);
+
+  const [sdNow, restNow, sdPrev, restPrev] = await Promise.all([
+    fetchRows(current, SD_ONLY),
+    fetchRows(current, REST),
+    fetchRows(prev, SD_ONLY),
+    fetchRows(prev, REST)
+  ]);
+
+  const rowsNow  = sdNow.concat(restNow);
+  const rowsPrev = sdPrev.concat(restPrev);
+
+  const prevAlt = new Map();
+  for (const r of rowsPrev){
+    const st = (r.station || "").trim();
+    const a  = num(r.alti);
+    if (st && a != null) prevAlt.set(st, a);
+  }
+
+  [tempLayer, dewLayer, windNumLayer, windArrowLayer, gustLayer, visLayer, presLayer, wxLayer].forEach(l => l.clearLayers());
+
+  const z = map.getZoom();
+  const minSep = dynamicMinSep();
+
+  const idxTemp = new CollisionIndex(Math.max(24, minSep));
+  const idxDew  = new CollisionIndex(Math.max(24, minSep));
+  const idxWind = new CollisionIndex(Math.max(24, minSep));
+  const idxGust = new CollisionIndex(Math.max(24, minSep));
+  const idxVis  = new CollisionIndex(Math.max(24, minSep));
+  const idxPres = new CollisionIndex(Math.max(24, minSep));
+  const idxWx   = new CollisionIndex(Math.max(24, minSep));
+  const idxArr  = new CollisionIndex(Math.max(30, minSep));
+
+  // --- Prevent METAR circles from colliding with city labels (white bubbles) ---
+  const citySep = 34; // px separation between any METAR marker center and a city label anchor
+  const idxCity = new CollisionIndex(Math.max(30, citySep));
+
+  // Seed the collision index with whichever city labels are currently active at this zoom
+  const activeCities = [];
+  if (z >= 4) activeCities.push(...CITIES_TIER1);
+  if (z >= 6) activeCities.push(...CITIES_TIER2);
+  if (z >= 7) activeCities.push(...CITIES_TIER3);
+
+  for (const c of activeCities){
+    const latC = c[1], lonC = c[2];
+    const pC = map.latLngToLayerPoint([latC, lonC]);
+    idxCity.canPlace(pC, citySep); // reserve space around label anchor
+  }
+
+  
+  // --- Nudge a METAR if it would collide with a city label ---
+  // We try a small set of pixel offsets (relative to the station point) to keep BOTH the city bubble and the METAR visible.
+  // This is especially useful for Sioux Falls and other major hubs where you want the METAR to always show.
+  const STATION_NUDGES = new Map([
+    ["KFSD", [[24, 16],[26,-14],[-26,14],[-26,-14],[0,24],[0,-24],[32,0],[-32,0]]],
+    ["FSD",  [[24, 16],[26,-14],[-26,14],[-26,-14],[0,24],[0,-24],[32,0],[-32,0]]],
+    ["KDEN", [[26, 16],[26,-14],[-26,14],[-26,-14],[0,26],[0,-26],[36,0],[-36,0]]],
+    ["DEN",  [[26, 16],[26,-14],[-26,14],[-26,-14],[0,26],[0,-26],[36,0],[-36,0]]],
+    ["KOMA", [[26, 16],[26,-14],[-26,14],[-26,-14],[0,26],[0,-26],[36,0],[-36,0]]],
+    ["OMA",  [[26, 16],[26,-14],[-26,14],[-26,-14],[0,26],[0,-26],[36,0],[-36,0]]],
+  ]);
+
+  function tryPlaceAgainstCityLabels(lat, lon, station, sepPx){
+    const base = map.latLngToLayerPoint([lat, lon]);
+
+    // Try original first
+    if (idxCity.canPlace(base, sepPx)){
+      const ll0 = map.layerPointToLatLng(base);
+      return {lat: ll0.lat, lon: ll0.lng};
+    }
+
+    const key = (station || "").trim().toUpperCase();
+    const nudges = STATION_NUDGES.get(key) || [[22,14],[22,-14],[-22,14],[-22,-14],[0,22],[0,-22],[30,0],[-30,0]];
+
+    for (const o of nudges){
+      const p = L.point(base.x + o[0], base.y + o[1]);
+      if (idxCity.canPlace(p, sepPx)){
+        const ll = map.layerPointToLatLng(p);
+        return {lat: ll.lat, lon: ll.lng};
+      }
+    }
+    return null;
+  }
+
+let shown = 0, total = 0;
+
+  for (const r of rowsNow){
+    const lat = num(r.lat), lon = num(r.lon);
+    if (lat == null || lon == null) continue;
+    total++;
+
+    const st = (r.station || "").trim();
+
+    // Keep METAR circles from colliding with city labels (white bubbles).
+    // If it collides, try nudging the METAR slightly so BOTH remain visible.
+    const placed = tryPlaceAgainstCityLabels(lat, lon, st, citySep);
+    if (!placed) continue;
+    const plat = placed.lat, plon = placed.lon;
+
+const alti = num(r.alti);
+    const prevA = st ? prevAlt.get(st) : null;
+    const dAlt = (alti != null && prevA != null) ? (alti - prevA) : null;
+
+    const popup = popupHTML(r, dAlt);
+
+    const tmp = num(r.tmpf);
+    const dew = num(r.dwpf);
+
+    const drct = num(r.drct);
+    const sknt = num(r.sknt);
+    const gust = num(r.gust);
+
+    const mph  = sknt != null ? ktToMph(sknt) : null;
+    const gmh  = gust != null ? ktToMph(gust) : null;
+
+    const visObj = parseVisMiles(r.vsby);
+    const visMi = visObj.miles;
+
+    if (tmp != null && allowByCollision(idxTemp, lat, lon, minSep)){
+      L.marker([lat,lon], { icon: dotIcon(String(Math.round(tmp)), tempColorF(tmp), 28, 12) })
+        .bindPopup(popup).addTo(tempLayer);
+    }
+
+    if (dew != null && allowByCollision(idxDew, lat, lon, minSep)){
+      L.marker([lat,lon], { icon: dotIcon(String(Math.round(dew)), dewColorF(dew), 28, 12) })
+        .bindPopup(popup).addTo(dewLayer);
+    }
+
+    if (mph != null && allowByCollision(idxWind, lat, lon, minSep)){
+      L.marker([lat,lon], { icon: dotIcon(String(Math.round(mph)), windColorMph(mph), 28, 12) })
+        .bindPopup(popup).addTo(windNumLayer);
+    }
+
+    if (mph != null && drct != null && allowByCollision(idxArr, lat, lon, minSep)){
+      const toDir = (drct + 180) % 360;
+      L.marker([lat,lon], { icon: windArrowIcon(toDir, mph) })
+        .bindPopup(popup).addTo(windArrowLayer);
+    }
+
+    if (gmh != null && allowByCollision(idxGust, lat, lon, minSep)){
+      L.marker([lat,lon], { icon: dotIcon(String(Math.round(gmh)), windColorMph(gmh), 30, 12) })
+        .bindPopup(popup).addTo(gustLayer);
+    }
+
+    if ((visObj.label || "").trim() && allowByCollision(idxVis, lat, lon, minSep)){
+      const style = visStyle(visMi);
+      L.marker([lat,lon], { icon: dotIcon(visObj.label, style.bg, 30, 11, style.border) })
+        .bindPopup(popup).addTo(visLayer);
+    }
+
+    if (alti != null && allowByCollision(idxPres, lat, lon, minSep)){
+      const fill = pressureTrendColor(dAlt);
+      L.marker([lat,lon], { icon: dotIcon(alti.toFixed(2), fill, 44, 12, "#999") })
+        .bindPopup(popup).addTo(presLayer);
+    }
+
+    const wx = (r.wxcodes || "").trim();
+    const isDay = isDaylightAt(lat, lon, current); // use current map time
+    // Show an icon even if wx is blank (represents "clear/none"), but still obey thinning/collision.
+    if (allowByCollision(idxWx, lat, lon, minSep)){
+      L.marker([lat,lon], { icon: wxEmojiIcon(wx, isDay, 30) })
+        .bindPopup(popup).addTo(wxLayer);
+    }
+
+    shown++;
+  }
+
+  setStatus(`Stations shown: ${shown}/${total} (minSep ${minSep}px).`);
+
+  await loadAlerts();
+}
+
+refreshAll().catch(err => {
+  console.error(err);
+  setStatus("Error: " + err.message);
+});
 </script>
+
+<script>
+(function(){
+  function updateBannerOffset(){
+    const b = document.getElementById('banner');
+    if(!b) return;
+    document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 8) + 'px');
+  }
+  updateBannerOffset();
+  window.addEventListener('resize', updateBannerOffset);
+})();
+</script>
+
 </body>
 </html>
