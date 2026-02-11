@@ -1655,35 +1655,35 @@ function particlesFileForDay(dayNum){
 }
 
 
-function normalizeVelocityJson(raw){
+function normalizeVelocityJson(raw, opts={}){
   // Accept:
   // 1) Array of windy records [{header,data},{header,data}]
   // 2) Wrapper {data:[...records...]}
-  // 3) Single record with interleaved u/v pairs in data[] length = nx*ny*2
+  // 3) Single record with interleaved u/v pairs in one record: data.length = nx*ny*2
   //
-  // Also normalizes orientation so data is NORTH->SOUTH with negative dy
-  // (leaflet-velocity expects this; ERA5 exports often come SOUTH->NORTH).
+  // opts.flipDyPositive:
+  //   - If true, and header.dy > 0, we flip rows so la1 becomes NORTH-most and dy becomes negative.
+  const flipDyPositive = !!opts.flipDyPositive;
 
   let arr = raw;
   if (raw && Array.isArray(raw.data)) arr = raw.data;
-
   if (!Array.isArray(arr)) return arr;
 
-  // --- helper: flip rows if dy is positive (south->north) ---
-  function orientNorthToSouth(field){
+  function flipIfNeeded(field){
+    if (!flipDyPositive) return field;
     if (!field || !field.header || !Array.isArray(field.data)) return field;
-    const h = field.header;
+
+    const h = field.header || {};
     const nx = h.nx || h.Nx;
     const ny = h.ny || h.Ny;
-    const dy = h.dy;
-    const la1 = h.la1;
+    const dy = h.dy ?? h.Dy;
+    const la1 = h.la1 ?? h.La1;
+
     if (!nx || !ny || typeof dy !== "number" || typeof la1 !== "number") return field;
 
-    // If dy > 0, the grid is likely stored from SOUTH -> NORTH.
-    // Convert to NORTH -> SOUTH by reversing row order and making dy negative,
-    // and adjust la1 to the new NORTH-most latitude.
+    // If dy > 0, the grid is SOUTH -> NORTH. Leaflet-velocity expects NORTH -> SOUTH.
     if (dy > 0){
-      const out = new Array(nx*ny);
+      const out = new Array(nx * ny);
       for (let y=0; y<ny; y++){
         const srcRow = (ny - 1 - y) * nx;
         const dstRow = y * nx;
@@ -1692,7 +1692,7 @@ function normalizeVelocityJson(raw){
         }
       }
       field.data = out;
-      field.header = { ...h, la1: la1 + dy*(ny-1), dy: -dy };
+      field.header = { ...h, la1: la1 + dy * (ny - 1), dy: -dy };
     }
     return field;
   }
@@ -1718,12 +1718,12 @@ function normalizeVelocityJson(raw){
       const hu = { ...base, parameterCategory: 2, parameterNumber: 2, parameterNumberName: "eastward_wind", parameterUnit: "m/s" };
       const hv = { ...base, parameterCategory: 2, parameterNumber: 3, parameterNumberName: "northward_wind", parameterUnit: "m/s" };
 
-      return [orientNorthToSouth({ header: hu, data: u }), orientNorthToSouth({ header: hv, data: v })];
+      return [ flipIfNeeded({ header: hu, data: u }), flipIfNeeded({ header: hv, data: v }) ];
     }
   }
 
   // Normal case: multiple fields (u + v)
-  return arr.map(rec => orientNorthToSouth(rec));
+  return arr.map(rec => flipIfNeeded(rec));
 }
 
 
@@ -1741,7 +1741,7 @@ async function refreshParticlesIfOn(){
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const raw = await r.json();
-    const velData = normalizeVelocityJson(raw);
+    const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
 
     if (particlesLayer){
       try { map.removeLayer(particlesLayer); } catch(_) {}
@@ -1805,7 +1805,7 @@ async function refreshJetIfOn(){
     if (!r.ok) throw new Error("HTTP " + r.status);
 
     const raw = await r.json();
-    const velData = normalizeVelocityJson(raw);
+    const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
 
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
