@@ -1687,8 +1687,49 @@ function normalizeVelocityJson(raw){
       return [{ header: hu, data: u }, { header: hv, data: v }];
     }
   }
-
+  arr = ensureNorthToSouth(arr);
   return arr;
+}
+
+function ensureNorthToSouth(records){
+  // Leaflet-velocity expects the grid to start at the *northwest* corner
+  // with dy negative (lat decreases as you move "down" the grid).
+  // If dy is positive (south->north storage), flip the data rows and
+  // rewrite la1/dy so the vectors render correctly.
+  if (!Array.isArray(records) || records.length < 2) return records;
+
+  const h = (records[0] && records[0].header) ? records[0].header : {};
+  const nx = Number(h.nx || h.Nx);
+  const ny = Number(h.ny || h.Ny);
+  const dy = Number(h.dy);
+  const la1 = Number(h.la1);
+
+  if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(dy) || !Number.isFinite(la1)) return records;
+  if (dy < 0) return records; // already north->south
+
+  const newLa1 = la1 + dy * (ny - 1); // move to the northern edge
+  const newDy = -Math.abs(dy);
+
+  function flipRows(data){
+    if (!Array.isArray(data) || data.length !== nx * ny) return data;
+    const out = new Array(data.length);
+    for (let row = 0; row < ny; row++){
+      const src = (ny - 1 - row) * nx;
+      const dst = row * nx;
+      for (let col = 0; col < nx; col++){
+        out[dst + col] = data[src + col];
+      }
+    }
+    return out;
+  }
+
+  const u = flipRows(records[0].data);
+  const v = flipRows(records[1].data);
+
+  const hu = { ...(records[0].header || {}), la1: newLa1, dy: newDy };
+  const hv = { ...(records[1].header || {}), la1: newLa1, dy: newDy };
+
+  return [{ header: hu, data: u }, { header: hv, data: v }];
 }
 
 
