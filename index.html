@@ -614,6 +614,16 @@
 ------------------------------------------------------------ */
 const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
 
+/* ------------------------------------------------------------
+   Story START button (temporary: opens your Google Sheet in a new tab)
+------------------------------------------------------------ */
+const STORY_SHEET_URL = "https://docs.google.com/spreadsheets/d/17Hzg7R2fSHJGbOKAKMqG4QAqA1GlSJwFM-SQwPhQObY/edit?gid=0#gid=0";
+const beginBtn = document.getElementById("beginStoryBtn");
+if (beginBtn){
+  beginBtn.addEventListener("click", () => window.open(STORY_SHEET_URL, "_blank"));
+}
+
+
 const osm = L.tileLayer(
   "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
   { attribution: "© OpenStreetMap © CARTO", subdomains:"abcd", maxZoom: 19 }
@@ -1701,38 +1711,45 @@ async function refreshParticlesIfOn(){
 async function refreshJetIfOn(){
   if (!map.hasLayer(jetToggle)) return;
 
-  const url = "./jetstream/jetstream_250mb_20180414_18Z.json"; // you already have this file in the repo
+  if (typeof L.velocityLayer !== "function"){
+    setStatus("Jet stream: leaflet-velocity did not load.");
+    return;
+  }
+
+  const url = "./jetstream/jetstream_250mb_20180414_18Z.json";
   try{
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
-    const data = await r.json();
+
+    const raw = await r.json();
+    const velData = normalizeVelocityJson(raw);
 
     if (jetLayer){
-      map.removeLayer(jetLayer);
+      try{ map.removeLayer(jetLayer); }catch(_){}
       jetLayer = null;
     }
 
     jetLayer = L.velocityLayer({
-      data: data,
+      data: velData,
       displayValues: true,
       displayOptions: {
         velocityType: "250mb Wind",
         displayPosition: "bottomleft",
         displayEmptyString: "No wind data"
       },
-      maxVelocity: 100,      // adjust if you want stronger/weaker particle speed scaling
-      velocityScale: 0.01,   // smaller = slower particles
-      particleAge: 60,
-      particleMultiplier: 0.25,
+      maxVelocity: 120,
+      velocityScale: 0.008,
+      particleAge: 70,
+      particleMultiplier: 0.35,
       lineWidth: 1,
       opacity: 0.85
     });
 
     jetLayer.addTo(map);
-    setStatus("Jet stream particles loaded.");
+    setStatus(`Jet stream loaded: ${url.replace("./","")}`);
   }catch(e){
-    console.warn("Jet stream failed:", e.message);
-    setStatus("Jet stream file not found / not readable.");
+    console.warn("Jet stream failed:", url, e.message);
+    setStatus(`Jet stream not found / not readable: ${url.replace("./","")}`);
   }
 }
 
