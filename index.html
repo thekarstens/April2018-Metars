@@ -16,56 +16,36 @@
   #map { height:100%; background:#fff; }
 
   .dot{
-    border-radius:50%;
-    border:2px solid #333;
+    border-radius:50%; border:2px solid #333;
     display:flex;align-items:center;justify-content:center;
-    font:800 12px/1 Arial, sans-serif;
-    color:#fff;
+    font:800 12px/1 Arial, sans-serif; color:#fff;
     text-shadow: 0 1px 2px rgba(0,0,0,0.55);
     box-shadow: 0 1px 3px rgba(0,0,0,.25);
     user-select:none;
   }
 
   .swatch {
-    display:inline-block;
-    width:12px; height:12px;
-    border:1px solid #333;
-    border-radius:2px;
-    vertical-align:middle;
-    margin-right:6px;
+    display:inline-block; width:12px; height:12px;
+    border:1px solid #333; border-radius:2px;
+    vertical-align:middle; margin-right:6px;
   }
 
+  /* Observed radar styling */
   .obs-radar { filter: brightness(1.22) contrast(1.08) saturate(1.05); mix-blend-mode: multiply; }
 
   /* ===== Banner styles ===== */
   .tvbanner{
-    position:absolute; top:0; left:0; right:0;
-    z-index:99999;
-    background:rgba(11,28,45,0.90);
-    color:#fff;
+    position:absolute; top:0; left:0; right:0; z-index:99999;
+    background:rgba(11,28,45,0.92); color:#fff;
     border-bottom:2px solid rgba(255,255,255,0.12);
   }
-
-  .tvbanner::before{
-    content:"";
-    position:absolute;
-    top:0; left:0; right:0;
-    height:4px;
-    background:#2f4e94;
-  }
+  .tvbanner::before{ content:""; position:absolute; top:0; left:0; right:0; height:4px; background:#2f4e94; }
 
   .banner-topline{
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    gap:14px;
-    padding:10px 14px 6px 14px;
-    font-family: Arial, sans-serif;
-    text-transform:uppercase;
-    letter-spacing:.7px;
-    position:relative;
+    display:flex; align-items:center; justify-content:center; gap:14px;
+    padding:10px 14px 6px 14px; font-family: Arial, sans-serif;
+    text-transform:uppercase; letter-spacing:.7px; position:relative;
   }
-
   .top-lesson{font-weight:900;font-size:22px;white-space:nowrap}
   .top-question{font-weight:800;font-size:14px;letter-spacing:.2px;text-transform:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
   .top-q-label{font-weight:900;text-transform:uppercase;letter-spacing:.6px}
@@ -73,21 +53,13 @@
   .banner-divider{ height:3px; width:100%; background:#eab35b; opacity:0.95; }
 
   .banner-bottomline{
-    display:flex;
-    justify-content:space-between;
-    padding:6px 14px 10px 14px;
-    font-family: Arial, sans-serif;
-    align-items: center;
-    gap: 12px;
+    display:flex; justify-content:space-between; align-items:center;
+    padding:6px 14px 10px 14px; font-family: Arial, sans-serif; gap: 12px;
   }
 
   .product-center{
-    font:900 46px/1 Arial,sans-serif;
-    letter-spacing:1px;
-    text-transform:uppercase;
-    white-space:nowrap;
-    flex: 1;
-    text-align: center;
+    font:900 46px/1 Arial,sans-serif; letter-spacing:1px;
+    text-transform:uppercase; white-space:nowrap; flex: 1; text-align: center;
   }
 
   .bbtn{pointer-events:auto;border:1px solid rgba(255,255,255,0.35);background:rgba(0,0,0,0.25);color:#fff;
@@ -95,10 +67,8 @@
 
   .bbtn-story{
     position:absolute; right:16px; top:10px;
-    background:#fdd835 !important;
-    color:#111 !important;
-    padding:10px 14px !important;
-    border-radius:14px !important;
+    background:#fdd835 !important; color:#111 !important;
+    padding:10px 14px !important; border-radius:14px !important;
     font:900 13px Arial !important;
   }
 
@@ -110,17 +80,23 @@
   }
 
   .town-label{
-    background: #ffffff;
-    border:1px solid rgba(0,0,0,0.25);
-    padding:2px 6px;
-    border-radius:10px;
-    font:800 11px/1 Arial, sans-serif;
+    background: #ffffff; border:1px solid rgba(0,0,0,0.25); padding:2px 6px;
+    border-radius:10px; font:800 11px/1 Arial, sans-serif;
     box-shadow: 0 1px 4px rgba(0,0,0,.15);
   }
 
+  /* JET STREAM LEGEND PANEL */
+  #jetLegend {
+    position: absolute; right: 10px; bottom: 65px; z-index: 900;
+    background: rgba(11,28,45,0.85); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 12px; padding: 10px; color: #fff; font-family: Arial;
+    display: none; /* Only show when layer is active */
+  }
+  .leg-bar { width: 140px; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #1e3a8a, #3b82f6, #10b981, #facc15, #ef4444); }
+  .leg-labels { display: flex; justify-content: space-between; font: 900 10px Arial; margin-top: 4px; opacity: 0.9; }
+
   :root{ --banner-offset: 130px; }
   .leaflet-top{ top: var(--banner-offset) !important; }
-
 </style>
 </head>
 
@@ -139,84 +115,44 @@
 
   <div class="banner-bottomline">
       <div class="opacity-wrap" title="Opacity" style="display:flex; align-items:center; gap:8px;">
-        <span class="op-label" style="font:900 11px Arial; text-transform:uppercase;">Opacity</span>
+        <span class="op-label" style="font:900 11px Arial;">OPACITY</span>
         <input id="radarOpacity" type="range" min="20" max="100" value="70" style="width:160px;" />
       </div>
-
       <div class="product-center" id="productLabel">METARS</div>
-
       <div class="time-controls" style="display:flex; align-items:center; gap:10px;">
          <button class="bbtn" id="backBtnBanner">◀</button>
          <div class="btime" id="bannerTimeLabel">April 14, 2018 7AM</div>
          <input id="timeSlider" type="range" min="0" max="10" value="0" style="width:140px;"/>
          <button class="bbtn" id="fwdBtnBanner">▶</button>
        </div>
-
       <button class="bbtn" id="zoomOutBtnBanner">−</button>
       <button class="bbtn" id="zoomInBtnBanner">+</button>
   </div>
 </div>
 
-<img id="brandLogo" src="./logo.png" alt="Weather Workshops" />
+<div id="jetLegend">
+  <div style="font:900 11px Arial; margin-bottom:5px; text-transform:uppercase;">Jet Wind Speed (Kts)</div>
+  <div class="leg-bar"></div>
+  <div class="leg-labels"><span>30</span><span>70</span><span>100</span><span>130</span><span>160+</span></div>
+</div>
+
+<img id="brandLogo" src="./logo.png" />
 <div id="map"></div>
 
 <script>
-/* ------------------------------------------------------------
-   1) Map & Initialization
------------------------------------------------------------- */
+/* --- 1) Map Setup --- */
 const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
+const osm = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png").addTo(map);
 
-const osm = L.tileLayer(
-  "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
-  { attribution: "© OpenStreetMap © CARTO", subdomains:"abcd", maxZoom: 19 }
-).addTo(map);
-
-const labels = L.tileLayer(
-  "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
-  { attribution: "", subdomains:"abcd", maxZoom: 19, pane: "overlayPane" }
-);
-
-/* ------------------------------------------------------------
-   2) City Labels
------------------------------------------------------------- */
-const cityLabelLayer = L.layerGroup().addTo(map);
-
-function makeCityLabel(name, lat, lon){
-  return L.marker([lat,lon], {
-    interactive: false,
-    icon: L.divIcon({ className: "town-label", html: name, iconSize: null })
-  });
-}
-
-const CITIES_TIER1 = [["Sioux Falls", 43.5446, -96.7311], ["Omaha", 41.2565, -95.9345], ["Minneapolis", 44.9778, -93.265], ["Des Moines", 41.5868, -93.625], ["Denver", 39.7392, -104.9903], ["Kansas City", 39.0997, -94.5786], ["Chicago", 41.8781, -87.6298]];
-const CITIES_TIER2 = [["Rapid City", 44.0805, -103.231], ["Pierre", 44.3683, -100.351], ["Fargo", 46.8772, -96.7898], ["Bismarck", 46.8083, -100.7837], ["Lincoln", 40.8136, -96.7026], ["Rochester", 44.0121, -92.4802], ["Madison", 43.0731, -89.4012], ["Milwaukee", 43.0389, -87.9065], ["St. Louis", 38.627, -90.1994]];
-
-function updateCityLabels(){
-  const z = map.getZoom();
-  if (z >= 9) {
-    if (!map.hasLayer(labels)) labels.addTo(map);
-    cityLabelLayer.clearLayers();
-  } else {
-    if (map.hasLayer(labels)) map.removeLayer(labels);
-    cityLabelLayer.clearLayers();
-    if (z >= 4) CITIES_TIER1.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
-    if (z >= 6) CITIES_TIER2.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
-  }
-}
-map.on("zoomend", updateCityLabels);
-updateCityLabels();
-
-/* ------------------------------------------------------------
-   3) Velocity Data Normalizer (FIXED)
------------------------------------------------------------- */
+/* --- 2) Boundary Fix Logic --- */
 function normalizeVelocityJson(raw, opts={}){
   const flipDyPositive = !!opts.flipDyPositive;
   function ensureBounds(h){
     if (!h) return h;
-    const nx = h.nx || h.Nx; const ny = h.ny || h.Ny;
-    const dx = h.dx ?? h.Dx; const dy = h.dy ?? h.Dy;
-    const lo1 = h.lo1 ?? h.Lo1; const la1 = h.la1 ?? h.La1;
-    if (nx && ny && typeof dx === "number" && typeof dy === "number"){
+    const nx = h.nx || h.Nx, ny = h.ny || h.Ny;
+    const dx = h.dx ?? h.Dx, dy = h.dy ?? h.Dy;
+    const lo1 = h.lo1 ?? h.Lo1, la1 = h.la1 ?? h.La1;
+    if (nx && ny && typeof dx === "number"){
       h.lo2 = h.lo2 ?? (lo1 + dx * (nx - 1));
       h.la2 = h.la2 ?? (la1 + dy * (ny - 1));
       h.nx = nx; h.ny = ny; h.dx = dx; h.dy = dy; h.lo1 = lo1; h.la1 = la1;
@@ -241,9 +177,7 @@ function normalizeVelocityJson(raw, opts={}){
   });
 }
 
-/* ------------------------------------------------------------
-   4) Jet Stream Particles
------------------------------------------------------------- */
+/* --- 3) Jet Stream Logic (FIXED) --- */
 const jetToggle = L.layerGroup();
 let jetLayer = null;
 
@@ -254,69 +188,26 @@ async function refreshJetIfOn(){
     const r = await fetch(url, { cache: "no-store" });
     const raw = await r.json();
     const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
+    
+    // CRITICAL: Force Global Mercator Bounds to prevent "sliver" compression
+    velData.forEach(field => {
+      field.header.la1 = 90; field.header.la2 = -90;
+      field.header.lo1 = 0;  field.header.lo2 = 360;
+    });
+
     if (jetLayer) map.removeLayer(jetLayer);
     jetLayer = L.velocityLayer({
       displayValues: true,
       displayOptions: { velocityType: "250mb Wind", position: "bottomleft" },
       data: velData,
-      maxVelocity: 120, velocityScale: 0.005, particleMultiplier: 1/800, lineWidth: 2, opacity: 0.8
+      maxVelocity: 160, velocityScale: 0.006, particleMultiplier: 1/850, lineWidth: 2, opacity: 0.9
     });
     jetLayer.addTo(map);
+    document.getElementById("jetLegend").style.display = "block";
   } catch(e) { console.error("Jet stream failed:", e); }
 }
 
-/* ------------------------------------------------------------
-   5) Solar & Weather Calculations
------------------------------------------------------------- */
-function julianDayUTC(d){
-  const Y = d.getUTCFullYear(); const M = d.getUTCMonth() + 1; const D = d.getUTCDate();
-  const H = d.getUTCHours() + d.getUTCMinutes()/60;
-  let y = Y, m = M; if (m <= 2){ y -= 1; m += 12; }
-  const A = Math.floor(y/100); const B = 2 - A + Math.floor(A/4);
-  return Math.floor(365.25*(y+4716)) + Math.floor(30.6001*(m+1)) + D + B - 1524.5 + H/24;
-}
-
-function isDaylightAt(lat, lon, dUtc){
-  const rad = Math.PI/180; const JD = julianDayUTC(dUtc);
-  const T = (JD - 2451545.0) / 36525.0;
-  let L0 = 280.46646 + T*(36000.76983); L0 = ((L0 % 360) + 360) % 360;
-  const M = 357.52911 + T*(35999.05029);
-  const dec = Math.asin(Math.sin(23.439*rad) * Math.sin((L0 + 1.915*Math.sin(M*rad))*rad));
-  const mins = dUtc.getUTCHours()*60 + dUtc.getUTCMinutes() + 4*lon;
-  const ha = ((mins % 1440)/4 - 180) * rad;
-  const elev = 90 - Math.acos(Math.sin(lat*rad)*Math.sin(dec) + Math.cos(lat*rad)*Math.cos(dec)*Math.cos(ha)) / rad;
-  return elev > 0;
-}
-
-function pickWxEmoji(wxcodes, isDay){
-  const wx = (wxcodes || "").toUpperCase();
-  if (!wx) return isDay ? "☀️" : "🌙";
-  if (wx.includes("TS")) return "⛈️";
-  if (wx.includes("SN")) return "🌨️";
-  if (wx.includes("RA") || wx.includes("DZ")) return "🌧️";
-  if (wx.includes("FG") || wx.includes("BR")) return "🌫️";
-  return "☁️";
-}
-
-/* ------------------------------------------------------------
-   6) Collision Index & Thinning
------------------------------------------------------------- */
-class CollisionIndex {
-  constructor(cell){ this.cell = cell; this.grid = new Map(); }
-  canPlace(p, minSep){
-    const cx = Math.floor(p.x/this.cell), cy = Math.floor(p.y/this.cell);
-    for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){
-      const arr = this.grid.get(`${cx+dx},${cy+dy}`);
-      if(arr) for(const q of arr) if(Math.hypot(p.x-q.x, p.y-q.y) < minSep) return false;
-    }
-    if(!this.grid.has(`${cx},${cy}`)) this.grid.set(`${cx},${cy}`, []);
-    this.grid.get(`${cx},${cy}`).push(p); return true;
-  }
-}
-
-/* ------------------------------------------------------------
-   7) Master Refresh & UI
------------------------------------------------------------- */
+/* --- 4) Master Layer Control --- */
 const tempLayer = L.layerGroup().addTo(map);
 const alertsLayer = L.geoJSON(null);
 const windArrowLayer = L.layerGroup();
@@ -331,11 +222,12 @@ L.control.layers(null, {
 }, { collapsed: false }).addTo(map);
 
 map.on("overlayadd", e => { if (e.layer === jetToggle) refreshJetIfOn(); });
+map.on("overlayremove", e => { if (e.layer === jetToggle) document.getElementById("jetLegend").style.display = "none"; });
 
+/* --- Keep All Your Original Story/UI Events Below --- */
 document.getElementById("beginStoryBtn").onclick = () => window.open("https://docs.google.com/spreadsheets/d/17Hzg7R2fSHJGbOKAKMqG4QAqA1GlSJwFM-SQwPhQObY/edit?gid=0#gid=0");
 document.getElementById("zoomInBtnBanner").onclick = () => map.zoomIn();
 document.getElementById("zoomOutBtnBanner").onclick = () => map.zoomOut();
-
 </script>
 </body>
 </html>
