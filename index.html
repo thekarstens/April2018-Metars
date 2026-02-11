@@ -1665,6 +1665,21 @@ function normalizeVelocityJson(raw, opts={}){
   //   - If true, and header.dy > 0, we flip rows so la1 becomes NORTH-most and dy becomes negative.
   const flipDyPositive = !!opts.flipDyPositive;
 
+  function ensureBounds(h){
+    if (!h) return h;
+    const nx = h.nx || h.Nx;
+    const ny = h.ny || h.Ny;
+    const dx = (h.dx ?? h.Dx);
+    const dy = (h.dy ?? h.Dy);
+    const lo1 = (h.lo1 ?? h.Lo1);
+    const la1 = (h.la1 ?? h.La1);
+    if (nx && ny && typeof dx==="number" && typeof dy==="number" && typeof lo1==="number" && typeof la1==="number"){
+      if (typeof h.lo2 !== "number" && typeof h.Lo2 !== "number") h.lo2 = lo1 + dx * (nx - 1);
+      if (typeof h.la2 !== "number" && typeof h.La2 !== "number") h.la2 = la1 + dy * (ny - 1);
+    }
+    return h;
+  }
+
   let arr = raw;
   if (raw && Array.isArray(raw.data)) arr = raw.data;
   if (!Array.isArray(arr)) return arr;
@@ -1673,7 +1688,8 @@ function normalizeVelocityJson(raw, opts={}){
     if (!flipDyPositive) return field;
     if (!field || !field.header || !Array.isArray(field.data)) return field;
 
-    const h = field.header || {};
+    const h0 = field.header || {};
+    const h = ensureBounds(h0);
     const nx = h.nx || h.Nx;
     const ny = h.ny || h.Ny;
     const dy = h.dy ?? h.Dy;
@@ -1692,7 +1708,7 @@ function normalizeVelocityJson(raw, opts={}){
         }
       }
       field.data = out;
-      field.header = { ...h, la1: la1 + dy * (ny - 1), dy: -dy };
+      field.header = { ...h, la1: la1 + dy * (ny - 1), la2: la1, dy: -dy };
     }
     return field;
   }
@@ -1714,7 +1730,8 @@ function normalizeVelocityJson(raw, opts={}){
       }
 
       // Add the header fields leaflet-velocity expects
-      const base = { ...h };
+      const base = ensureBounds({ ...h });
+      // leaflet-velocity relies on lo2/la2 for extent calculations
       const hu = { ...base, parameterCategory: 2, parameterNumber: 2, parameterNumberName: "eastward_wind", parameterUnit: "m/s" };
       const hv = { ...base, parameterCategory: 2, parameterNumber: 3, parameterNumberName: "northward_wind", parameterUnit: "m/s" };
 
@@ -1723,7 +1740,10 @@ function normalizeVelocityJson(raw, opts={}){
   }
 
   // Normal case: multiple fields (u + v)
-  return arr.map(rec => flipIfNeeded(rec));
+  return arr.map(rec => {
+    if (rec && rec.header) rec.header = ensureBounds(rec.header);
+    return flipIfNeeded(rec);
+  });
 }
 
 
