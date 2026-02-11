@@ -1748,7 +1748,7 @@ async function refreshJetIfOn(){
     return;
   }
 
-  const JET_FILE = "era5_wind_250hPa_20180410_12z_mercator (1).json";
+  const JET_FILE = "era5_wind_250hPa_20180410_12z_mercator.json";
   const url = "./jetstream/" + encodeURI(JET_FILE);
   try{
     const r = await fetch(url, { cache:"no-store" });
