@@ -1,13 +1,21 @@
-function refreshJetIfOn(data) {
-    if (data) {
-        // correct handling of interleaved u/v wind data for leaflet-velocity
-        const windData = data.map((item) => {
-            return {
-                u: item.u,
-                v: item.v
-            };
-        });
-        // logic to update the leaflet-velocity visualization
-        updateLeafletVelocity(windData);
+async function refreshJetIfOn() {
+    // Check if the jet stream is on
+    if (!isJetStreamOn()) {
+        return;
     }
+
+    const response = await fetch('/path/to/your/api');  // Update with your API endpoint
+    const data = await response.json();
+
+    // Assuming data contains u and v wind components
+    const u = data.u;
+    const v = data.v;
+
+    // Process interleaved u/v wind data for leaflet-velocity
+    const velocities = u.map((uValue, index) => {
+        return { u: uValue, v: v[index] };
+    });
+
+    // Update velocity layer on the map
+    updateVelocityLayer(velocities);
 }
