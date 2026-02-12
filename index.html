@@ -14,7 +14,7 @@
 <script src="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.js"></script>
 
 <style>html, body { height:100%; margin:0; }
-  #map { height:100%; background:#fff; }
+  
 
   .dot{
     border-radius:50%;
@@ -75,8 +75,7 @@
   }
 
 /* Leaflet layer control nudge down below banner */
-  :root{ --banner-offset: 150px; }
-.leaflet-top.leaflet-right{ top: var(--banner-offset); }
+  .leaflet-top.leaflet-right{ top: var(--banner-offset); }
 .leaflet-top.leaflet-left{ top: var(--banner-offset); }
 
 /* Simple town label style */
@@ -531,7 +530,6 @@
 
 /* --- Mobile banner tightening --- */
 @media (max-width: 600px){
-  :root{ --banner-offset: 110px; }
   .tvbanner{ padding:6px 10px; }
   .banner-inner{ flex-wrap:wrap; gap:8px; }
   .banner-title{ font-size:22px; }
@@ -558,6 +556,31 @@
 }
 /* extra safety: if Leaflet applies .leaflet-top separately */
 .leaflet-top{ top: var(--banner-offset) !important; }
+
+/* ===== Banner/map layout hard-fix (prevents velocity canvas drifting) ===== */
+:root{ --banner-offset: 140px; } /* JS will auto-update this */
+
+#banner{
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 10000 !important;
+}
+
+#map{
+  position: absolute !important;
+  top: var(--banner-offset) !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  height: auto !important;
+}
+
+/* Keep leaflet controls below banner */
+.leaflet-control-container .leaflet-top{
+  top: var(--banner-offset) !important;
+}
 
 </style>
 </head>
@@ -2208,14 +2231,21 @@ refreshAll().catch(err => {
 });
 </script>
 
+
+
+
 <script>
 (function(){
   function updateBannerOffset(){
     const b = document.getElementById('banner');
     if(!b) return;
     document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 8) + 'px');
+    // If Leaflet map exists, force a resize so overlays (incl. velocity) align.
+    if (window.map && typeof window.map.invalidateSize === 'function'){
+      window.map.invalidateSize(true);
+    }
   }
-  updateBannerOffset();
+  window.addEventListener('load', updateBannerOffset);
   window.addEventListener('resize', updateBannerOffset);
 })();
 </script>
