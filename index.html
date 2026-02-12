@@ -653,8 +653,10 @@ function updateBannerOffset(){
     }
     // Re-sync velocity canvases after the DOM settles
     setTimeout(() => {
-      syncVelocityLayerCanvas(particlesLayer);
-      syncVelocityLayerCanvas(jetLayer);
+      attachVelocityCanvasToMap(particlesLayer);
+  syncVelocityLayerCanvas(particlesLayer);
+      attachVelocityCanvasToMap(jetLayer);
+  syncVelocityLayerCanvas(jetLayer);
     }, 60);
   }catch(_){}
 }
@@ -676,6 +678,7 @@ function syncVelocityLayerCanvas(layer){
       (layer._container && layer._container.querySelector && layer._container.querySelector("canvas"));
     if (!canvas) return;
 
+    attachVelocityCanvasToMap(layer);
     const s = map.getSize();
     if (canvas.width !== s.x) canvas.width = s.x;
     if (canvas.height !== s.y) canvas.height = s.y;
@@ -686,10 +689,42 @@ function syncVelocityLayerCanvas(layer){
 }
 
 
+// Ensure leaflet-velocity's canvas actually lives inside Leaflet's overlayPane.
+// Some builds of leaflet-velocity end up attaching the canvas to <body>, which
+// makes it draw at the top of the page instead of over the map.
+function attachVelocityCanvasToMap(layer){
+  try{
+    if (!layer || !map) return;
+    const canvas =
+      layer._canvas ||
+      layer._velocityCanvas ||
+      (layer._container && layer._container.querySelector && layer._container.querySelector("canvas")) ||
+      (layer._canvasLayer && layer._canvasLayer._canvas);
+
+    if (!canvas) return;
+
+    const pane = map.getPanes && map.getPanes().overlayPane ? map.getPanes().overlayPane : map.getContainer();
+    if (pane && canvas.parentElement !== pane){
+      pane.appendChild(canvas);
+    }
+
+    // Make sure it's positioned relative to the pane
+    canvas.style.position = "absolute";
+    canvas.style.left = "0";
+    canvas.style.top = "0";
+    canvas.style.pointerEvents = "none";
+    canvas.style.zIndex = "300";
+  }catch(_){}
+}
+
+
+
 
 // keep both velocity layers synced on resize/zoom/pan
 map.on("resize zoomend moveend", () => {
+  attachVelocityCanvasToMap(particlesLayer);
   syncVelocityLayerCanvas(particlesLayer);
+  attachVelocityCanvasToMap(jetLayer);
   syncVelocityLayerCanvas(jetLayer);
 });
 /* ------------------------------------------------------------
@@ -1865,9 +1900,11 @@ async function refreshParticlesIfOn(){
     });
 
     particlesLayer.addTo(map);
+    attachVelocityCanvasToMap(particlesLayer);
     setTimeout(updateBannerOffset, 60);
     // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(particlesLayer); }, 60);
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityCanvasToMap(particlesLayer);
+  syncVelocityLayerCanvas(particlesLayer); }, 60);
     setStatus(`Particles loaded: ${url.replace("./","")}`);
 
   } catch(e){
@@ -2043,9 +2080,11 @@ async function refreshJetIfOn(){
     });
 
     jetLayer.addTo(map);
+    attachVelocityCanvasToMap(jetLayer);
     setTimeout(updateBannerOffset, 60);
     // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(jetLayer); }, 60);
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityCanvasToMap(jetLayer);
+  syncVelocityLayerCanvas(jetLayer); }, 60);
     setStatus(`Jet stream loaded: ${url.replace("./","")}`);
     console.log("Jet stream layer added:", url, velData[0]?.header);
 
