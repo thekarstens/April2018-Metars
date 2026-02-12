@@ -1867,7 +1867,7 @@ async function refreshParticlesIfOn(){
     particlesLayer.addTo(map);
     setTimeout(updateBannerOffset, 60);
     // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(particlesLayer);
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(particlesLayer); }, 60);
     setStatus(`Particles loaded: ${url.replace("./","")}`);
 
   } catch(e){
@@ -2045,7 +2045,7 @@ async function refreshJetIfOn(){
     jetLayer.addTo(map);
     setTimeout(updateBannerOffset, 60);
     // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(jetLayer);
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(jetLayer); }, 60);
     setStatus(`Jet stream loaded: ${url.replace("./","")}`);
     console.log("Jet stream layer added:", url, velData[0]?.header);
 
