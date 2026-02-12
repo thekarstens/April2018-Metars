@@ -597,6 +597,15 @@ canvas.leaflet-velocity-overlay{
   top: var(--banner-offset) !important;
 }
 
+
+/* === FIX: Do NOT offset Leaflet panes (this breaks velocity canvas alignment) === */
+.leaflet-pane, .leaflet-map-pane, .leaflet-tile-pane, .leaflet-overlay-pane, .leaflet-shadow-pane, .leaflet-marker-pane, .leaflet-tooltip-pane, .leaflet-popup-pane{
+  top: 0 !important;
+  left: 0 !important;
+}
+/* Keep controls below the banner, but don't move the map panes */
+.leaflet-control-container{ pointer-events:none; }
+.leaflet-control-container *{ pointer-events:auto; }
 </style>
 </head>
 
@@ -651,6 +660,62 @@ canvas.leaflet-velocity-overlay{
    1) Map
 ------------------------------------------------------------ */
 const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
+
+// ---------------------------------------------------------------------
+// FIX: keep leaflet-velocity canvases INSIDE the Leaflet map panes.
+// Some builds of leaflet-velocity will momentarily insert its canvas/container
+// under <body>, which makes the particles draw at the top of the page
+// instead of over the map (especially with an overlay banner).
+// We watch for those nodes and immediately re-parent them into overlayPane.
+// ---------------------------------------------------------------------
+function _relocateVelocityDom(){
+  try{
+    if (!map || !map.getPanes) return;
+    const overlayPane = map.getPanes().overlayPane;
+    if (!overlayPane) return;
+
+    const selectors = [
+      ".leaflet-velocity-layer",
+      ".leaflet-velocity-container",
+      ".leaflet-velocity-overlay",
+      "canvas.leaflet-velocity-overlay",
+      "canvas.leaflet-velocity-layer"
+    ];
+
+    document.querySelectorAll(selectors.join(",")).forEach((node) => {
+      if (!node) return;
+      // If node isn't already in the map container, move it.
+      if (!map.getContainer().contains(node)){
+        overlayPane.appendChild(node);
+      } else if (node.parentElement !== overlayPane && node.tagName === "CANVAS"){
+        overlayPane.appendChild(node);
+      }
+      node.style.position = "absolute";
+      node.style.left = "0";
+      node.style.top = "0";
+      node.style.pointerEvents = "none";
+      node.style.zIndex = "350";
+    });
+  }catch(e){
+    console.warn("velocity DOM relocate failed:", e);
+  }
+}
+
+// Run once after initial layout, and again after Leaflet settles.
+setTimeout(_relocateVelocityDom, 0);
+setTimeout(_relocateVelocityDom, 250);
+
+// Observe DOM insertions so we catch canvases created AFTER toggle-on.
+(function(){
+  try{
+    const obs = new MutationObserver(() => _relocateVelocityDom());
+    obs.observe(document.body, { childList:true, subtree:true });
+    map.on("zoomstart movestart", _relocateVelocityDom);
+    map.on("zoomend moveend resize", _relocateVelocityDom);
+  }catch(e){
+    console.warn("MutationObserver unavailable:", e);
+  }
+})();
 window.map = map;
 // --- leaflet-velocity DOM/pane alignment helpers ---
 // If the velocity layer's canvas/container ends up attached to <body>, it will draw at the
@@ -2084,6 +2149,8 @@ async function refreshJetIfOn(){
     });
 
     jetLayer.addTo(map);
+    setTimeout(_relocateVelocityDom, 0);
+    setTimeout(_relocateVelocityDom, 50);
     attachVelocityContainerToOverlay(jetLayer);
     setTimeout(updateBannerOffset, 60);
     // ensure velocity canvas matches final map size
