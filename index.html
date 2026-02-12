@@ -661,10 +661,37 @@ function syncVelocityLayerCanvas(layer){
   }catch(_){}
 }
 
+
+function forceVelocityCanvasIntoMap(layer){
+  try{
+    if (!layer || !map) return;
+    const canvas =
+      layer._canvas ||
+      layer._velocityCanvas ||
+      (layer._container && layer._container.querySelector && layer._container.querySelector("canvas"));
+    if (!canvas) return;
+
+    // Ensure canvas lives inside Leaflet's overlay pane (so it tracks map position/clip)
+    const overlayPane = map.getPanes && map.getPanes().overlayPane;
+    if (overlayPane && canvas.parentElement !== overlayPane){
+      overlayPane.appendChild(canvas);
+    }
+
+    canvas.style.position = "absolute";
+    canvas.style.top = "0";
+    canvas.style.left = "0";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.pointerEvents = "none";
+  }catch(_){}
+}
+
 // keep both velocity layers synced on resize/zoom/pan
 map.on("resize zoomend moveend", () => {
   syncVelocityLayerCanvas(particlesLayer);
+    forceVelocityCanvasIntoMap(particlesLayer);
   syncVelocityLayerCanvas(jetLayer);
+    forceVelocityCanvasIntoMap(jetLayer);
 });
 /* ------------------------------------------------------------
    Story START button (temporary: opens your Google Sheet in a new tab)
@@ -1840,7 +1867,8 @@ async function refreshParticlesIfOn(){
 
     particlesLayer.addTo(map);
     // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(particlesLayer); }, 60);
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(particlesLayer);
+    forceVelocityCanvasIntoMap(particlesLayer); }, 60);
     setStatus(`Particles loaded: ${url.replace("./","")}`);
 
   } catch(e){
@@ -2017,7 +2045,8 @@ async function refreshJetIfOn(){
 
     jetLayer.addTo(map);
     // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(jetLayer); }, 60);
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; syncVelocityLayerCanvas(jetLayer);
+    forceVelocityCanvasIntoMap(jetLayer); }, 60);
     setStatus(`Jet stream loaded: ${url.replace("./","")}`);
     console.log("Jet stream layer added:", url, velData[0]?.header);
 
