@@ -597,15 +597,6 @@ canvas.leaflet-velocity-overlay{
   top: var(--banner-offset) !important;
 }
 
-
-/* === FIX: Do NOT offset Leaflet panes (this breaks velocity canvas alignment) === */
-.leaflet-pane, .leaflet-map-pane, .leaflet-tile-pane, .leaflet-overlay-pane, .leaflet-shadow-pane, .leaflet-marker-pane, .leaflet-tooltip-pane, .leaflet-popup-pane{
-  top: 0 !important;
-  left: 0 !important;
-}
-/* Keep controls below the banner, but don't move the map panes */
-.leaflet-control-container{ pointer-events:none; }
-.leaflet-control-container *{ pointer-events:auto; }
 </style>
 </head>
 
