@@ -739,22 +739,6 @@ map.on("resize zoomend moveend", () => {
   if (jetLayer) resyncVelocityLayer(jetLayer);
 });
 
-// --- Keep leaflet-velocity canvases aligned with the Leaflet map ---
-// Sometimes leaflet-velocity initializes its canvas before the map has its final size
-// (banner/layout shifts), which can leave the particles "stuck" at the top.
-// This helper forces the velocity canvas to match map.getSize() and triggers a reset.
-// Make sure it's positioned relative to the pane
-    canvas.style.position = "absolute";
-    canvas.style.left = "0";
-    canvas.style.top = "0";
-    canvas.style.pointerEvents = "none";
-    canvas.style.zIndex = "300";
-  }catch(_){}
-}
-
-
-
-
 // keep both velocity layers synced on resize/zoom/pan
 map.on("resize zoomend moveend", () => {
   attachVelocityContainerToOverlay(particlesLayer);
