@@ -579,6 +579,19 @@
   overflow: hidden !important;
 }
 
+
+/* Ensure leaflet-velocity canvases are clipped to the map container */
+.leaflet-velocity-layer,
+.leaflet-velocity-container,
+.leaflet-velocity-overlay,
+canvas.leaflet-velocity-overlay{
+  position:absolute !important;
+  left:0 !important;
+  top:0 !important;
+  width:100% !important;
+  height:100% !important;
+  pointer-events:none !important;
+}
 /* Keep leaflet controls below banner */
 .leaflet-control-container .leaflet-top{
   top: var(--banner-offset) !important;
@@ -641,111 +654,78 @@ const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
 // --- leaflet-velocity DOM/pane alignment helpers ---
 // If the velocity layer's canvas/container ends up attached to <body>, it will draw at the
 // top of the page instead of over the Leaflet map. We force the *container* into overlayPane.
-function attachVelocityContainerToOverlay(layer){
+
+// --- leaflet-velocity DOM/pane alignment helpers ---
+// leaflet-velocity sometimes inserts its canvas/container into <body>.
+// If that happens (and because our map is pushed down by the banner),
+// the particles render "above" the map. We force any velocity DOM into the map's overlayPane.
+function forceVelocityIntoMap(layer){
   try{
-    if (!layer || !map) return;
+    if (!map) return;
     const overlayPane = map.getPanes && map.getPanes().overlayPane ? map.getPanes().overlayPane : null;
     if (!overlayPane) return;
 
-    // Prefer the layer container if present (leaflet-velocity uses a div wrapper in many builds)
-    const container =
-      layer._container ||
-      layer._el ||
-      (layer._canvas && layer._canvas.parentElement) ||
-      (layer._velocityCanvas && layer._velocityCanvas.parentElement) ||
-      null;
+    const nodes = new Set();
 
-    const canvas =
-      layer._canvas ||
-      layer._velocityCanvas ||
-      (container && container.querySelector ? container.querySelector("canvas") : null) ||
-      null;
-
-    const node = container || canvas;
-    if (!node) return;
-
-    // Ensure it lives inside Leaflet's overlayPane (so it gets clipped and moved with the map)
-    if (node.parentElement !== overlayPane){
-      overlayPane.appendChild(node);
+    // Try layer internals first
+    if (layer){
+      if (layer._container) nodes.add(layer._container);
+      if (layer._el) nodes.add(layer._el);
+      if (layer._canvas) nodes.add(layer._canvas);
+      if (layer._velocityCanvas) nodes.add(layer._velocityCanvas);
     }
 
-    // Leaflet panes are positioned; we just need the velocity node to fill the map.
-    node.classList && node.classList.add("leaflet-layer");
-    node.style.position = "absolute";
-    node.style.left = "0";
-    node.style.top = "0";
-    node.style.width = "100%";
-    node.style.height = "100%";
-    node.style.pointerEvents = "none";
-    node.style.zIndex = "300";
+    // Also grab any velocity DOM the plugin created
+    document.querySelectorAll(
+      ".leaflet-velocity-layer, .leaflet-velocity-container, .leaflet-velocity-overlay, canvas.leaflet-velocity-overlay"
+    ).forEach(n => nodes.add(n));
 
-    if (canvas){
-      canvas.style.width = "100%";
-      canvas.style.height = "100%";
-      canvas.style.pointerEvents = "none";
-      canvas.style.display = "block";
-    }
-  }catch(_){}
+    nodes.forEach(node => {
+      if (!node || !node.parentElement) return;
+      // Move the node (or its parent wrapper) into the overlayPane so it clips/moves with the map.
+      const moveNode = node.classList && node.classList.contains("leaflet-velocity-overlay") ? node : node;
+      if (moveNode.parentElement !== overlayPane){
+        overlayPane.appendChild(moveNode);
+      }
+      moveNode.style.position = "absolute";
+      moveNode.style.left = "0";
+      moveNode.style.top = "0";
+      moveNode.style.pointerEvents = "none";
+      moveNode.style.zIndex = "300";
+    });
+  }catch(e){
+    console.warn("forceVelocityIntoMap failed:", e);
+  }
 }
 
-// After any layout shift (banner resize, invalidateSize), re-sync the velocity canvases.
+function attachVelocityContainerToOverlay(layer){ forceVelocityIntoMap(layer); }
+
 function resyncVelocityLayer(layer){
   try{
     if (!layer || !map) return;
-    attachVelocityContainerToOverlay(layer);
+    forceVelocityIntoMap(layer);
     const s = map.getSize();
     const canvas =
       layer._canvas ||
       layer._velocityCanvas ||
       (layer._container && layer._container.querySelector ? layer._container.querySelector("canvas") : null);
+
     if (canvas){
-      // Match backing store to map size (not CSS size)
+      // Backing store must match the actual map pixel size
       if (canvas.width !== s.x) canvas.width = s.x;
       if (canvas.height !== s.y) canvas.height = s.y;
+      canvas.style.width = s.x + "px";
+      canvas.style.height = s.y + "px";
+      canvas.style.display = "block";
+      canvas.style.position = "absolute";
+      canvas.style.left = "0";
+      canvas.style.top = "0";
+      canvas.style.pointerEvents = "none";
     }
-    if (typeof layer._reset === "function") layer._reset();
-    if (typeof layer._redraw === "function") layer._redraw();
-  }catch(_){}
+  }catch(e){
+    console.warn("resyncVelocityLayer failed:", e);
+  }
 }
-
-
-
-// --- Keep banner height + map size in sync (critical for leaflet-velocity alignment) ---
-function updateBannerOffset(){
-  try{
-    const bannerEl = document.getElementById("banner");
-    const h = bannerEl ? Math.ceil(bannerEl.getBoundingClientRect().height) : 0;
-    document.documentElement.style.setProperty("--banner-offset", h + "px");
-
-    // Let Leaflet recalc its panes after layout shifts
-    if (map && typeof map.invalidateSize === "function"){
-      map.invalidateSize(true);
-    }
-    // Re-sync velocity canvases after the DOM settles
-    setTimeout(() => {
-      if (particlesLayer) resyncVelocityLayer(particlesLayer);
-      if (jetLayer) resyncVelocityLayer(jetLayer);
-    }, 60);
-  }catch(_){}
-}
-
-// run once on load + whenever the window resizes
-setTimeout(updateBannerOffset, 0);
-window.addEventListener("resize", () => setTimeout(updateBannerOffset, 80));
-
-// Light re-sync on map moves/zooms (do NOT re-parent repeatedly; just ensure canvas size matches)
-map.on("resize zoomend moveend", () => {
-  if (particlesLayer) resyncVelocityLayer(particlesLayer);
-  if (jetLayer) resyncVelocityLayer(jetLayer);
-});
-
-// keep both velocity layers synced on resize/zoom/pan
-map.on("resize zoomend moveend", () => {
-  attachVelocityContainerToOverlay(particlesLayer);
-  resyncVelocityLayer(particlesLayer);
-  attachVelocityContainerToOverlay(jetLayer);
-  resyncVelocityLayer(jetLayer);
-});
 /* ------------------------------------------------------------
    Story START button (temporary: opens your Google Sheet in a new tab)
 ------------------------------------------------------------ */
