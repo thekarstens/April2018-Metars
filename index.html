@@ -638,6 +638,76 @@
    1) Map
 ------------------------------------------------------------ */
 const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
+// --- leaflet-velocity DOM/pane alignment helpers ---
+// If the velocity layer's canvas/container ends up attached to <body>, it will draw at the
+// top of the page instead of over the Leaflet map. We force the *container* into overlayPane.
+function attachVelocityContainerToOverlay(layer){
+  try{
+    if (!layer || !map) return;
+    const overlayPane = map.getPanes && map.getPanes().overlayPane ? map.getPanes().overlayPane : null;
+    if (!overlayPane) return;
+
+    // Prefer the layer container if present (leaflet-velocity uses a div wrapper in many builds)
+    const container =
+      layer._container ||
+      layer._el ||
+      (layer._canvas && layer._canvas.parentElement) ||
+      (layer._velocityCanvas && layer._velocityCanvas.parentElement) ||
+      null;
+
+    const canvas =
+      layer._canvas ||
+      layer._velocityCanvas ||
+      (container && container.querySelector ? container.querySelector("canvas") : null) ||
+      null;
+
+    const node = container || canvas;
+    if (!node) return;
+
+    // Ensure it lives inside Leaflet's overlayPane (so it gets clipped and moved with the map)
+    if (node.parentElement !== overlayPane){
+      overlayPane.appendChild(node);
+    }
+
+    // Leaflet panes are positioned; we just need the velocity node to fill the map.
+    node.classList && node.classList.add("leaflet-layer");
+    node.style.position = "absolute";
+    node.style.left = "0";
+    node.style.top = "0";
+    node.style.width = "100%";
+    node.style.height = "100%";
+    node.style.pointerEvents = "none";
+    node.style.zIndex = "300";
+
+    if (canvas){
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+      canvas.style.pointerEvents = "none";
+      canvas.style.display = "block";
+    }
+  }catch(_){}
+}
+
+// After any layout shift (banner resize, invalidateSize), re-sync the velocity canvases.
+function resyncVelocityLayer(layer){
+  try{
+    if (!layer || !map) return;
+    attachVelocityContainerToOverlay(layer);
+    const s = map.getSize();
+    const canvas =
+      layer._canvas ||
+      layer._velocityCanvas ||
+      (layer._container && layer._container.querySelector ? layer._container.querySelector("canvas") : null);
+    if (canvas){
+      // Match backing store to map size (not CSS size)
+      if (canvas.width !== s.x) canvas.width = s.x;
+      if (canvas.height !== s.y) canvas.height = s.y;
+    }
+    if (typeof layer._reset === "function") layer._reset();
+    if (typeof layer._redraw === "function") layer._redraw();
+  }catch(_){}
+}
+
 
 
 // --- Keep banner height + map size in sync (critical for leaflet-velocity alignment) ---
@@ -653,10 +723,8 @@ function updateBannerOffset(){
     }
     // Re-sync velocity canvases after the DOM settles
     setTimeout(() => {
-      attachVelocityCanvasToMap(particlesLayer);
-  syncVelocityLayerCanvas(particlesLayer);
-      attachVelocityCanvasToMap(jetLayer);
-  syncVelocityLayerCanvas(jetLayer);
+      if (particlesLayer) resyncVelocityLayer(particlesLayer);
+      if (jetLayer) resyncVelocityLayer(jetLayer);
     }, 60);
   }catch(_){}
 }
@@ -665,50 +733,17 @@ function updateBannerOffset(){
 setTimeout(updateBannerOffset, 0);
 window.addEventListener("resize", () => setTimeout(updateBannerOffset, 80));
 
+// Light re-sync on map moves/zooms (do NOT re-parent repeatedly; just ensure canvas size matches)
+map.on("resize zoomend moveend", () => {
+  if (particlesLayer) resyncVelocityLayer(particlesLayer);
+  if (jetLayer) resyncVelocityLayer(jetLayer);
+});
+
 // --- Keep leaflet-velocity canvases aligned with the Leaflet map ---
 // Sometimes leaflet-velocity initializes its canvas before the map has its final size
 // (banner/layout shifts), which can leave the particles "stuck" at the top.
 // This helper forces the velocity canvas to match map.getSize() and triggers a reset.
-function syncVelocityLayerCanvas(layer){
-  try{
-    if (!layer || !map) return;
-    const canvas =
-      layer._canvas ||
-      layer._velocityCanvas ||
-      (layer._container && layer._container.querySelector && layer._container.querySelector("canvas"));
-    if (!canvas) return;
-
-    attachVelocityCanvasToMap(layer);
-    const s = map.getSize();
-    if (canvas.width !== s.x) canvas.width = s.x;
-    if (canvas.height !== s.y) canvas.height = s.y;
-
-    if (typeof layer._reset === "function") layer._reset();
-    if (typeof layer._redraw === "function") layer._redraw();
-  }catch(_){}
-}
-
-
-// Ensure leaflet-velocity's canvas actually lives inside Leaflet's overlayPane.
-// Some builds of leaflet-velocity end up attaching the canvas to <body>, which
-// makes it draw at the top of the page instead of over the map.
-function attachVelocityCanvasToMap(layer){
-  try{
-    if (!layer || !map) return;
-    const canvas =
-      layer._canvas ||
-      layer._velocityCanvas ||
-      (layer._container && layer._container.querySelector && layer._container.querySelector("canvas")) ||
-      (layer._canvasLayer && layer._canvasLayer._canvas);
-
-    if (!canvas) return;
-
-    const pane = map.getPanes && map.getPanes().overlayPane ? map.getPanes().overlayPane : map.getContainer();
-    if (pane && canvas.parentElement !== pane){
-      pane.appendChild(canvas);
-    }
-
-    // Make sure it's positioned relative to the pane
+// Make sure it's positioned relative to the pane
     canvas.style.position = "absolute";
     canvas.style.left = "0";
     canvas.style.top = "0";
@@ -722,10 +757,10 @@ function attachVelocityCanvasToMap(layer){
 
 // keep both velocity layers synced on resize/zoom/pan
 map.on("resize zoomend moveend", () => {
-  attachVelocityCanvasToMap(particlesLayer);
-  syncVelocityLayerCanvas(particlesLayer);
-  attachVelocityCanvasToMap(jetLayer);
-  syncVelocityLayerCanvas(jetLayer);
+  attachVelocityContainerToOverlay(particlesLayer);
+  resyncVelocityLayer(particlesLayer);
+  attachVelocityContainerToOverlay(jetLayer);
+  resyncVelocityLayer(jetLayer);
 });
 /* ------------------------------------------------------------
    Story START button (temporary: opens your Google Sheet in a new tab)
@@ -1900,11 +1935,12 @@ async function refreshParticlesIfOn(){
     });
 
     particlesLayer.addTo(map);
-    attachVelocityCanvasToMap(particlesLayer);
+  setTimeout(() => resyncVelocityLayer(particlesLayer), 50);
+    attachVelocityContainerToOverlay(particlesLayer);
     setTimeout(updateBannerOffset, 60);
     // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityCanvasToMap(particlesLayer);
-  syncVelocityLayerCanvas(particlesLayer); }, 60);
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityContainerToOverlay(particlesLayer);
+  resyncVelocityLayer(particlesLayer); }, 60);
     setStatus(`Particles loaded: ${url.replace("./","")}`);
 
   } catch(e){
@@ -1913,9 +1949,12 @@ async function refreshParticlesIfOn(){
   }
 }
 
+let _jetFetchInFlight = null;
 async function refreshJetIfOn(){
   // Only (re)build the jet layer if the checkbox is ON
   if (!map.hasLayer(jetToggle)) return;
+  if (_jetFetchInFlight) { console.log("Jet stream: fetch already in flight"); return; }
+  _jetFetchInFlight = true;
 
   if (typeof L.velocityLayer !== "function"){
     setStatus("Jet stream: leaflet-velocity did not load.");
@@ -2080,17 +2119,18 @@ async function refreshJetIfOn(){
     });
 
     jetLayer.addTo(map);
-    attachVelocityCanvasToMap(jetLayer);
+    attachVelocityContainerToOverlay(jetLayer);
     setTimeout(updateBannerOffset, 60);
     // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityCanvasToMap(jetLayer);
-  syncVelocityLayerCanvas(jetLayer); }, 60);
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityContainerToOverlay(jetLayer);
+  resyncVelocityLayer(jetLayer); }, 60);
     setStatus(`Jet stream loaded: ${url.replace("./","")}`);
     console.log("Jet stream layer added:", url, velData[0]?.header);
 
   }catch(e){
     console.error("Jet stream error:", e);
     setStatus(`Jet stream failed: ${e.message}`);
+    _jetFetchInFlight = null;
   }
 }
 
