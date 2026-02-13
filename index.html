@@ -13,8 +13,8 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.css"/>
 <script src="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.js"></script>
 
-<style>html, body { height:100%; margin:0; overflow:hidden; }
-  
+<style>html, body { height:100%; margin:0; }
+  #map { height:100%; background:#fff; }
 
   .dot{
     border-radius:50%;
@@ -75,8 +75,9 @@
   }
 
 /* Leaflet layer control nudge down below banner */
-  .leaflet-top.leaflet-right{ top: var(--banner-offset, 90px); }
-.leaflet-top.leaflet-left{ top: var(--banner-offset, 90px); }
+  :root{ --banner-offset: 150px; }
+.leaflet-top.leaflet-right{ top: var(--banner-offset); }
+.leaflet-top.leaflet-left{ top: var(--banner-offset); }
 
 /* Simple town label style */
   .town-label{
@@ -530,6 +531,7 @@
 
 /* --- Mobile banner tightening --- */
 @media (max-width: 600px){
+  :root{ --banner-offset: 110px; }
   .tvbanner{ padding:6px 10px; }
   .banner-inner{ flex-wrap:wrap; gap:8px; }
   .banner-title{ font-size:22px; }
@@ -557,55 +559,6 @@
 /* extra safety: if Leaflet applies .leaflet-top separately */
 .leaflet-top{ top: var(--banner-offset) !important; }
 
-/* ===== Banner/map layout hard-fix (prevents velocity canvas drifting) ===== */
-:root{ --banner-offset: 140px; } /* JS will auto-update this */
-
-#banner{
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  z-index: 10000 !important;
-}
-
-#map{
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  height: 100vh;
-  overflow: hidden;
-}
-
-
-/* Ensure leaflet-velocity canvases are clipped to the map container */
-.leaflet-velocity-layer,
-.leaflet-velocity-container,
-.leaflet-velocity-overlay,
-canvas.leaflet-velocity-overlay{
-  position:absolute !important;
-  left:0 !important;
-  top:0 !important;
-  width:100% !important;
-  height:100% !important;
-  pointer-events:none !important;
-}
-/* Keep leaflet controls below banner */
-.leaflet-control-container .leaflet-top{
-  top: var(--banner-offset) !important;
-}
-
-
-/* === FIX: Do NOT offset Leaflet panes (this breaks velocity canvas alignment) === */
-.leaflet-pane, .leaflet-map-pane, .leaflet-tile-pane, .leaflet-overlay-pane, .leaflet-shadow-pane, .leaflet-marker-pane, .leaflet-tooltip-pane, .leaflet-popup-pane{
-  top: 0 !important;
-  left: 0 !important;
-}
-/* Keep controls below the banner, but don't move the map panes */
-.leaflet-control-container{ pointer-events:none; }
-.leaflet-control-container *{ pointer-events:auto; }
 </style>
 </head>
 
@@ -661,142 +614,1051 @@ canvas.leaflet-velocity-overlay{
 ------------------------------------------------------------ */
 const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
 
-// ---------------------------------------------------------------------
-// FIX: keep leaflet-velocity canvases INSIDE the Leaflet map panes.
-// Some builds of leaflet-velocity will momentarily insert its canvas/container
-// under <body>, which makes the particles draw at the top of the page
-// instead of over the map (especially with an overlay banner).
-// We watch for those nodes and immediately re-parent them into overlayPane.
-// ---------------------------------------------------------------------
-function _relocateVelocityDom(){
-  try{
-    if (!map || !map.getPanes) return;
-    const overlayPane = map.getPanes().overlayPane;
-    if (!overlayPane) return;
+/* ------------------------------------------------------------
+   Story START button (temporary: opens your Google Sheet in a new tab)
+------------------------------------------------------------ */
+const STORY_SHEET_URL = "https://docs.google.com/spreadsheets/d/17Hzg7R2fSHJGbOKAKMqG4QAqA1GlSJwFM-SQwPhQObY/edit?gid=0#gid=0";
+const beginBtn = document.getElementById("beginStoryBtn");
+if (beginBtn){
+  beginBtn.addEventListener("click", () => window.open(STORY_SHEET_URL, "_blank"));
+}
 
-    const selectors = [
-      ".leaflet-velocity-layer",
-      ".leaflet-velocity-container",
-      ".leaflet-velocity-overlay",
-      "canvas.leaflet-velocity-overlay",
-      "canvas.leaflet-velocity-layer"
-    ];
 
-    document.querySelectorAll(selectors.join(",")).forEach((node) => {
-      if (!node) return;
-      // If node isn't already in the map container, move it.
-      if (!map.getContainer().contains(node)){
-        overlayPane.appendChild(node);
-      } else if (node.parentElement !== overlayPane && node.tagName === "CANVAS"){
-        overlayPane.appendChild(node);
-      }
-      node.style.position = "absolute";
-      node.style.left = "0";
-      node.style.top = "0";
-      node.style.pointerEvents = "none";
-      node.style.zIndex = "350";
-    });
-  }catch(e){
-    console.warn("velocity DOM relocate failed:", e);
+const osm = L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+  { attribution: "© OpenStreetMap © CARTO", subdomains:"abcd", maxZoom: 19 }
+).addTo(map);
+
+// --- MODIS True Color (NASA GIBS) ---
+// Uses GIBS WMTS REST pattern adapted as XYZ tiles:
+// https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/{Layer}/default/{YYYY-MM-DD}/{TileMatrixSet}/{z}/{y}/{x}.jpg
+function ymd(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  return `${Y}-${M}-${D}`;
+}
+function modisUrlForDate(d){
+  const day = ymd(d);
+  return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${day}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`;
+}
+const modis = L.tileLayer(modisUrlForDate(new Date(Date.UTC(2018,3,14,0,0,0))), {
+  attribution: "NASA GIBS",
+  maxZoom: 9,
+  opacity: 0.70
+});
+// (Not added by default; turn it on via the Layers control)
+
+// Optional label tiles (Carto light labels)
+const labels = L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
+  { attribution: "", subdomains:"abcd", maxZoom: 19, pane: "overlayPane" }
+);
+
+// --- Extra Midwest city labels (shows more as you zoom in) ---
+const cityLabelLayer = L.layerGroup().addTo(map);
+
+function makeCityLabel(name, lat, lon){
+  return L.marker([lat,lon], {
+    interactive: false,
+    icon: L.divIcon({
+      className: "town-label",
+      html: name,
+      iconSize: null
+    })
+  });
+}
+
+const CITIES_TIER1 = [
+  ["Sioux Falls", 43.5446, -96.7311],
+  ["Omaha", 41.2565, -95.9345],
+  ["Minneapolis", 44.9778, -93.265],
+  ["Des Moines", 41.5868, -93.625],
+  ["Denver", 39.7392, -104.9903],
+  ["Kansas City", 39.0997, -94.5786],
+  ["Chicago", 41.8781, -87.6298]
+];
+
+const CITIES_TIER2 = [
+  ["Rapid City", 44.0805, -103.231],
+  ["Pierre", 44.3683, -100.351],
+  ["Fargo", 46.8772, -96.7898],
+  ["Bismarck", 46.8083, -100.7837],
+  ["Lincoln", 40.8136, -96.7026],
+  ["North Platte", 41.1403, -100.7601],
+  ["Rochester", 44.0121, -92.4802],
+  ["Madison", 43.0731, -89.4012],
+  ["Milwaukee", 43.0389, -87.9065],
+  ["St. Louis", 38.627, -90.1994],
+  ["Cheyenne", 41.14, -104.8202],
+  ["Billings", 45.7833, -108.5007],
+  ["Wichita", 37.6872, -97.3301]
+];
+
+const CITIES_TIER3 = [
+  ["Brookings", 44.3114, -96.7984],
+  ["Watertown", 44.8994, -97.115],
+  ["Aberdeen", 45.4647, -98.4865],
+  ["Huron", 44.3633, -98.2143],
+  ["Grand Island", 40.9264, -98.342],
+  ["Norfolk", 42.028, -97.417],
+  ["Scottsbluff", 41.8666, -103.6672],
+  ["Duluth", 46.7867, -92.1005],
+  ["Topeka", 39.0473, -95.6752],
+  ["Casper", 42.8501, -106.3252],
+  ["Bozeman", 45.6769, -111.0429],
+  ["Springfield", 37.2089, -93.2923]
+];
+
+function updateCityLabels(){
+  const z = map.getZoom();
+  
+  // --- Declutter strategy ---
+  // - Use our custom white-bubble labels at mid zooms
+  // - Switch to built-in map labels only when zoomed in far enough
+  if (z >= 9) {
+    if (!map.hasLayer(labels)) labels.addTo(map);
+    if (map.hasLayer(cityLabelLayer)) map.removeLayer(cityLabelLayer);
+  } else {
+    if (map.hasLayer(labels)) map.removeLayer(labels);
+    if (!map.hasLayer(cityLabelLayer)) cityLabelLayer.addTo(map);
+  }
+
+  cityLabelLayer.clearLayers();
+
+  if (z < 4) { return; }
+
+  if (z >= 4){
+    CITIES_TIER1.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
+  }
+  if (z >= 6){
+    CITIES_TIER2.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
+  }
+  if (z >= 7){
+    CITIES_TIER3.forEach(c => cityLabelLayer.addLayer(makeCityLabel(c[0], c[1], c[2])));
+  }
+}
+map.on("zoomend", updateCityLabels);
+updateCityLabels();
+
+map.attributionControl.setPrefix(false);
+
+const statusEl = document.getElementById("status");
+function setStatus(msg){ if (statusEl) statusEl.textContent = msg; }
+
+/* ------------------------------------------------------------
+   2) Time controls (METAR + Alerts)
+------------------------------------------------------------ */
+let current = new Date(Date.UTC(2018, 3, 14, 15, 0, 0)); // default (will snap to timeline)
+const stepHours = 3;
+
+// Alerts timeline index (optional, but recommended)
+let ALERTS_TIMELINE = null; // array of {t, file, count}
+let ALERTS_MIN = null;
+let ALERTS_MAX = null;
+
+function parseISOZ(s){
+  // '2018-04-12T00:00:00Z' -> Date
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+async function loadAlertsTimelineIndex(){
+  try {
+    const r = await fetch('./timeline_index.json', { cache:'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const idx = await r.json();
+    if (!Array.isArray(idx) || !idx.length) throw new Error('empty index');
+    ALERTS_TIMELINE = idx
+      .map(x => ({...x, _d: parseISOZ(x.t)}))
+      .filter(x => x._d);
+    ALERTS_TIMELINE.sort((a,b)=>a._d-b._d);
+    ALERTS_MIN = ALERTS_TIMELINE[0]._d;
+    ALERTS_MAX = ALERTS_TIMELINE[ALERTS_TIMELINE.length-1]._d;
+  } catch(e){
+    // Not fatal: we'll fall back to the old per-hour filenames
+    console.warn('No timeline_index.json found or unreadable:', e.message);
+    ALERTS_TIMELINE = null;
+    ALERTS_MIN = null;
+    ALERTS_MAX = null;
   }
 }
 
-// Run once after initial layout, and again after Leaflet settles.
-setTimeout(_relocateVelocityDom, 0);
-setTimeout(_relocateVelocityDom, 250);
-
-// Observe DOM insertions so we catch canvases created AFTER toggle-on.
-(function(){
-  try{
-    const obs = new MutationObserver(() => _relocateVelocityDom());
-    obs.observe(document.body, { childList:true, subtree:true });
-    map.on("zoomstart movestart", _relocateVelocityDom);
-    map.on("zoomend moveend resize", _relocateVelocityDom);
-  }catch(e){
-    console.warn("MutationObserver unavailable:", e);
+function snapCurrentToAlertsTimeline(){
+  if (!ALERTS_TIMELINE || !ALERTS_TIMELINE.length) return null;
+  // clamp
+  if (current < ALERTS_MIN) current = new Date(ALERTS_MIN.getTime());
+  if (current > ALERTS_MAX) current = new Date(ALERTS_MAX.getTime());
+  // nearest
+  let best = ALERTS_TIMELINE[0];
+  let bestDt = Math.abs(current - best._d);
+  for (let i=1;i<ALERTS_TIMELINE.length;i++){
+    const it = ALERTS_TIMELINE[i];
+    const dt = Math.abs(current - it._d);
+    if (dt < bestDt){ best = it; bestDt = dt; }
   }
-})();
-window.map = map;
-// --- leaflet-velocity DOM/pane alignment helpers ---
-// leaflet-velocity occasionally appends its canvas/container to <body> instead of inside Leaflet's
-// mapPane. When you have a fixed banner pushing the map down, that looks like particles "painting"
-// at the very top of the page. This helper aggressively re-parents ALL velocity DOM into the
-// map's overlayPane and forces its size/position to match the map.
+  // snap label/time to the actual frame time to avoid confusing 'out of range' times
+  current = new Date(best._d.getTime());
+  return best;
+}
 
-function updateBannerOffset(){
-  try{
-    const banner = document.getElementById("banner");
-    const h = banner ? Math.ceil(banner.getBoundingClientRect().height) : 0;
-    document.documentElement.style.setProperty("--banner-offset", h + "px");
-    // If Leaflet has already initialized, re-measure the map after the CSS change.
-    if (window.map && typeof window.map.invalidateSize === "function"){
-      setTimeout(() => { try{ window.map.invalidateSize(); }catch(_){} }, 50);
+
+function fmtZ(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `${Y}-${M}-${D} ${H}Z`;
+}
+function toISOZ(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `${Y}-${M}-${D}T${H}:00:00Z`;
+}
+
+function formatCentralLabel(dUtc) {
+  // Display in "Central time" without DST complexity for students.
+  // April is technically CDT, but we keep a fixed -5 hour offset for clarity.
+  const central = new Date(dUtc.getTime() - 5*3600*1000); // UTC -> Central (approx)
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const m = months[central.getUTCMonth()];
+  const day = central.getUTCDate();
+  const year = central.getUTCFullYear();
+  let hr = central.getUTCHours();
+  const ampm = hr >= 12 ? "PM" : "AM";
+  hr = hr % 12; if (hr === 0) hr = 12;
+  return `${m} ${day}, ${year} ${hr}${ampm}`;
+}
+
+function updateTimeLabel(){
+  const bt = document.getElementById("bannerTimeLabel");
+  if (bt) bt.textContent = formatCentralLabel(current);
+}
+
+// Banner time slider (WeatherBell-style)
+// - If alerts timeline_index.json exists, we use its times.
+// - Otherwise we fall back to a simple 3-hour timeline for Apr 13–16.
+let TIMELINE = [];
+const timeSlider = document.getElementById("timeSlider");
+let sliderTimer = null;
+
+// Initialize banner label + timeline AFTER slider vars exist (prevents TDZ errors)
+updateTimeLabel();
+rebuildTimelineFromIndex();
+
+// Try to load alerts timeline index (if present in repo)
+loadAlertsTimelineIndex().then(()=>{
+  snapCurrentToAlertsTimeline();
+  updateTimeLabel();
+  rebuildTimelineFromIndex();
+});
+function buildFallbackTimeline(){
+  const out = [];
+  const start = new Date(Date.UTC(2018,3,13,0,0,0));
+  const end   = new Date(Date.UTC(2018,3,16,0,0,0));
+  for (let t = start.getTime(); t <= end.getTime(); t += stepHours*3600*1000){
+    out.push(new Date(t));
+  }
+  return out;
+}
+
+function rebuildTimelineFromIndex(){
+  if (ALERTS_TIMELINE && ALERTS_TIMELINE.length){
+    TIMELINE = ALERTS_TIMELINE.map(x => new Date(x._d.getTime()));
+  } else {
+    TIMELINE = buildFallbackTimeline();
+  }
+  if (timeSlider){
+    timeSlider.min = 0;
+    timeSlider.max = Math.max(0, TIMELINE.length - 1);
+    syncSliderToCurrent();
+  }
+}
+
+function nearestTimelineIndex(d){
+  if (!TIMELINE.length) return 0;
+  let bestI = 0;
+  let bestDt = Math.abs(d - TIMELINE[0]);
+  for (let i=1;i<TIMELINE.length;i++){
+    const dt = Math.abs(d - TIMELINE[i]);
+    if (dt < bestDt){ bestDt = dt; bestI = i; }
+  }
+  return bestI;
+}
+
+function syncSliderToCurrent(){
+  if (!timeSlider || !TIMELINE.length) return;
+  timeSlider.value = String(nearestTimelineIndex(current));
+}
+
+function setCurrentFromSlider(doRefresh){
+  if (!timeSlider || !TIMELINE.length) return;
+  const idx = Math.max(0, Math.min(TIMELINE.length-1, Number(timeSlider.value)));
+  current = new Date(TIMELINE[idx].getTime());
+  snapCurrentToAlertsTimeline();
+  updateTimeLabel();
+  if (doRefresh){
+    // simple debounce so drag doesn't spam requests
+    if (sliderTimer) clearTimeout(sliderTimer);
+    sliderTimer = setTimeout(()=>refreshAll(), 250);
+  }
+}
+
+if (timeSlider){
+  timeSlider.addEventListener("input", ()=>setCurrentFromSlider(true));
+}
+
+
+async function stepTime(deltaHours){
+  current = new Date(current.getTime() + deltaHours*3600*1000);
+  snapCurrentToAlertsTimeline();
+  updateTimeLabel();
+  syncSliderToCurrent();
+  await refreshAll();
+}
+
+// Banner time buttons (master controls)
+const backBtnBanner = document.getElementById("backBtnBanner");
+const fwdBtnBanner  = document.getElementById("fwdBtnBanner");
+if (backBtnBanner) backBtnBanner.onclick = () => stepTime(-stepHours);
+if (fwdBtnBanner)  fwdBtnBanner.onclick  = () => stepTime(+stepHours);
+
+// Banner zoom buttons
+const zoomOutBtnBanner = document.getElementById("zoomOutBtnBanner");
+const zoomInBtnBanner  = document.getElementById("zoomInBtnBanner");
+if (zoomOutBtnBanner) zoomOutBtnBanner.onclick = () => map.zoomOut();
+if (zoomInBtnBanner)  zoomInBtnBanner.onclick  = () => map.zoomIn();
+
+// Opacity slider currently controls MODIS (and can later control radar overlays too)
+const opacitySlider = document.getElementById("radarOpacity");
+function setRasterOpacityFromSlider(){
+  if (!opacitySlider) return;
+  const o = Math.max(0, Math.min(1, Number(opacitySlider.value)/100));
+  if (modis) modis.setOpacity(o);
+}
+if (opacitySlider){
+  opacitySlider.addEventListener("input", setRasterOpacityFromSlider);
+  setRasterOpacityFromSlider();
+}
+
+
+/* ------------------------------------------------------------
+   3) Particles day (currently fixed)
+------------------------------------------------------------ */
+let particleDay = 14; // 13, 14, 15 (change here if needed)
+
+/* ------------------------------------------------------------
+   4) Layers
+------------------------------------------------------------ */
+const tempLayer = L.layerGroup().addTo(map);
+const dewLayer  = L.layerGroup();
+const windNumLayer = L.layerGroup();
+const windArrowLayer = L.layerGroup();
+const gustLayer = L.layerGroup();
+const visLayer  = L.layerGroup();
+const presLayer = L.layerGroup();
+const wxLayer   = L.layerGroup();
+
+// Alerts
+const alertsLayer = L.geoJSON(null);
+
+// Particles: placeholder for checkbox + actual velocity layer
+const particlesToggle = L.layerGroup();
+let particlesLayer = null;
+
+// Jet stream (250mb) velocity particles (Leaflet-Velocity)
+const jetToggle = L.layerGroup();
+let jetLayer = null;
+
+L.control.layers(
+  { "OpenStreetMap": osm, "MODIS True Color (Terra)": modis },
+  {
+    "Temperature (°F)": tempLayer,
+    "Dew Point (°F)": dewLayer,
+    "Wind Speed (mph)": windNumLayer,
+    "Wind Arrows": windArrowLayer,
+    "Wind Gusts (mph)": gustLayer,
+    "Visibility (mi)": visLayer,
+    "Pressure (trend)": presLayer,
+    "Weather Codes": wxLayer,
+    "Alerts (WWA)": alertsLayer,
+    "Daily wind particles": particlesToggle,
+     "Jet stream (250mb) particles": jetToggle
+  },
+  { collapsed:false }
+).addTo(map);
+
+/* ------------------------------------------------------------
+   5) Collision thinning (drop stations if overlapping)
+------------------------------------------------------------ */
+class CollisionIndex {
+  constructor(cellSizePx){
+    this.cell = cellSizePx;
+    this.grid = new Map();
+  }
+  _key(cx, cy){ return `${cx},${cy}`; }
+  _cellOf(p){ return [Math.floor(p.x / this.cell), Math.floor(p.y / this.cell)]; }
+  canPlace(p, minSepPx){
+    const [cx, cy] = this._cellOf(p);
+    const r2 = minSepPx * minSepPx;
+    for (let dx=-1; dx<=1; dx++){
+      for (let dy=-1; dy<=1; dy++){
+        const key = this._key(cx+dx, cy+dy);
+        const arr = this.grid.get(key);
+        if (!arr) continue;
+        for (const q of arr){
+          const ddx = p.x - q.x;
+          const ddy = p.y - q.y;
+          if ((ddx*ddx + ddy*ddy) < r2) return false;
+        }
+      }
     }
-  }catch(_){}
-}
-
-function fixVelocityDom(){
-  try{
-    if (!window.map || !window.map.getPanes) return;
-    const overlayPane = window.map.getPanes().overlayPane;
-    if (!overlayPane) return;
-
-    const size = window.map.getSize ? window.map.getSize() : null;
-
-    const nodes = document.querySelectorAll(
-      ".leaflet-velocity-layer, .leaflet-velocity-overlay, .leaflet-velocity-container, canvas.leaflet-velocity-layer, canvas.leaflet-velocity-overlay"
-    );
-
-    nodes.forEach((node) => {
-      if (!node) return;
-
-      // Re-parent into Leaflet overlayPane (which is inside mapPane and inherits map transforms).
-      if (node.parentElement !== overlayPane){
-        try{ overlayPane.appendChild(node); }catch(_){}
-      }
-
-      // Force absolute positioning within the pane.
-      node.style.position = "absolute";
-      node.style.left = "0px";
-      node.style.top = "0px";
-      node.style.pointerEvents = "none";
-      node.style.zIndex = "350";
-
-      // Sync canvas backing store to the map size (prevents weird clipping/scaling).
-      if (size && node.tagName === "CANVAS"){
-        const w = Math.max(1, Math.round(size.x));
-        const h = Math.max(1, Math.round(size.y));
-        if (node.width !== w) node.width = w;
-        if (node.height !== h) node.height = h;
-        node.style.width = w + "px";
-        node.style.height = h + "px";
-      }else if (size && node.tagName === "DIV"){
-        node.style.width = Math.max(1, Math.round(size.x)) + "px";
-        node.style.height = Math.max(1, Math.round(size.y)) + "px";
-      }
-    });
-  }catch(e){
-    // keep silent; this is best-effort
+    const key = this._key(cx, cy);
+    if (!this.grid.has(key)) this.grid.set(key, []);
+    this.grid.get(key).push({x:p.x, y:p.y});
+    return true;
   }
 }
 
-// Watch for leaflet-velocity inserting nodes under <body> and immediately relocate them.
-(function(){
+function minSepForZoom(z){
+  // Fallback step function (used if dynamic cannot compute bounds)
+  if (z <= 4) return 92;   // very wide
+  if (z === 5) return 70;  // wide
+  if (z === 6) return 46;  // starting to fill in
+  if (z === 7) return 22;  // SD-ish view: mostly filled in
+  return 0;                // z >= 8 show all
+}
+
+function dynamicMinSep(){
+  // More robust thinning:
+  // - Use zoom AND the current viewport span (degrees).
+  // - When the view is "state-sized" (like SD filling the screen), show essentially all stations.
   try{
-    const mo = new MutationObserver(() => fixVelocityDom());
-    mo.observe(document.body, { childList:true, subtree:true });
-  }catch(_){}
-})();
+    const z = map.getZoom();
+    const b = map.getBounds();
+    const spanLon = Math.abs(b.getEast() - b.getWest());
+    const spanLat = Math.abs(b.getNorth() - b.getSouth());
+    const span = Math.max(spanLon, spanLat);
 
-// Keep in sync on map interactions/resizes.
-window.addEventListener("resize", () => { updateBannerOffset(); setTimeout(fixVelocityDom, 60); });
+    // If the current view is roughly state-sized (or tighter), let stations fill in.
+    if (span <= 7.5) return 0;
 
-// Backwards-compat aliases (older revisions referenced these)
-function forceVelocityIntoMap(){ fixVelocityDom(); }
-function _relocateVelocityDom(){ fixVelocityDom(); }
+    return minSepForZoom(z);
+  }catch(e){
+    return minSepForZoom(map.getZoom());
+  }
+}
+
+function allowByCollision(index, lat, lon, minSepPx){
+  if (minSepPx <= 0) return true;
+  const p = map.latLngToLayerPoint([lat, lon]);
+  return index.canPlace(p, minSepPx);
+}
+/* ------------------------------------------------------------
+   6) Color ramps
+------------------------------------------------------------ */
+function piecewiseColor(x, stops){
+  if (x == null || !Number.isFinite(x)) return "rgb(255,255,255)";
+  if (x <= stops[0].v) return `rgb(${stops[0].c.join(",")})`;
+  if (x >= stops[stops.length-1].v) return `rgb(${stops[stops.length-1].c.join(",")})`;
+  for (let i=0; i<stops.length-1; i++){
+    const a = stops[i], b = stops[i+1];
+    if (x >= a.v && x <= b.v){
+      const k = (x - a.v) / (b.v - a.v);
+      const r = Math.round(a.c[0] + (b.c[0]-a.c[0]) * k);
+      const g = Math.round(a.c[1] + (b.c[1]-a.c[1]) * k);
+      const bb= Math.round(a.c[2] + (b.c[2]-a.c[2]) * k);
+      return `rgb(${r},${g},${bb})`;
+    }
+  }
+  return "rgb(255,255,255)";
+}
+
+function tempColorF(t){
+  return piecewiseColor(t, [
+    {v: 10, c: [170, 220, 255]},
+    {v: 20, c: [120, 190, 255]},
+    {v: 30, c: [0, 70, 200]},
+    {v: 40, c: [0, 170, 0]},
+    {v: 50, c: [150, 255, 150]},
+    {v: 60, c: [255, 235, 0]},
+    {v: 70, c: [255, 140, 0]},
+    {v: 85, c: [255, 80, 0]}
+  ]);
+}
+
+function dewColorF(td){
+  return piecewiseColor(td, [
+    {v: 10, c: [90, 55, 20]},
+    {v: 20, c: [140, 95, 40]},
+    {v: 30, c: [200, 160, 110]},
+    {v: 50, c: [190, 200, 140]},
+    {v: 60, c: [0, 170, 0]},
+    {v: 70, c: [0, 90, 0]}
+  ]);
+}
+
+function windColorMph(spd){
+  return piecewiseColor(spd, [
+    {v: 0,  c: [0, 40, 160]},
+    {v: 10, c: [0, 120, 255]},
+    {v: 20, c: [0, 210, 180]},
+    {v: 35, c: [255, 220, 0]},
+    {v: 50, c: [255, 120, 0]},
+    {v: 70, c: [255, 80, 0]}
+  ]);
+}
+
+function pressureTrendColor(deltaInHg){
+  if (deltaInHg == null || !Number.isFinite(deltaInHg)) return "rgb(248,248,248)";
+  if (deltaInHg > 0.02)  return "rgb(215,245,215)";
+  if (deltaInHg < -0.02) return "rgb(255,220,220)";
+  return "rgb(240,240,240)";
+}
+
+function visStyle(vis){
+  if (vis == null || !Number.isFinite(vis)) {
+    return { bg:"rgba(255,255,255,0.65)", border:"#333" };
+  }
+  const v = Math.max(0, Math.min(10, vis));
+  const alpha = 1 - (v / 10);
+  const border = (v < 1) ? "#666" : "#333";
+  return { bg:`rgba(255,255,255,${alpha.toFixed(3)})`, border };
+}
+
+/* ------------------------------------------------------------
+   7) Icons
+------------------------------------------------------------ */
+function dotIcon(txt, fill, size=28, fontSize=12, borderColor="#333"){
+  return L.divIcon({
+    className:"",
+    html:`<div class="dot"
+              style="width:${size}px;height:${size}px;
+                     background:${fill};
+                     border-color:${borderColor};
+                     font-size:${fontSize}px;">${txt}</div>`,
+    iconSize:[size,size],
+    iconAnchor:[size/2,size/2]
+  });
+}
+
+/* Wind arrow as inline SVG divIcon */
+
+/* ------------------------------------------------------------
+   7b) Sun position (simple) + Weather icon mapping
+   - Used for "clear" day vs night so we don't show a sun at night.
+------------------------------------------------------------ */
+function julianDayUTC(d){
+  // d is a JS Date (UTC assumed)
+  const Y = d.getUTCFullYear();
+  const M = d.getUTCMonth() + 1;
+  const D = d.getUTCDate();
+  const H = d.getUTCHours() + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600;
+  let y = Y, m = M;
+  if (m <= 2){ y -= 1; m += 12; }
+  const A = Math.floor(y/100);
+  const B = 2 - A + Math.floor(A/4);
+  const JD0 = Math.floor(365.25*(y+4716)) + Math.floor(30.6001*(m+1)) + D + B - 1524.5;
+  return JD0 + H/24;
+}
+
+function solarElevationDeg(lat, lon, dUtc){
+  // Approx solar elevation (degrees) using common NOAA-style math.
+  // lat, lon in degrees (lon positive east; here we use west-negative which is fine).
+  const rad = Math.PI/180;
+  const JD = julianDayUTC(dUtc);
+  const T = (JD - 2451545.0) / 36525.0;
+
+  // Sun geom mean longitude + anomaly
+  let L0 = 280.46646 + T*(36000.76983 + T*0.0003032);
+  L0 = ((L0 % 360) + 360) % 360;
+  const M = 357.52911 + T*(35999.05029 - 0.0001537*T);
+
+  // Eccentricity
+  const e = 0.016708634 - T*(0.000042037 + 0.0000001267*T);
+
+  // Sun equation of center
+  const C = (1.914602 - T*(0.004817 + 0.000014*T))*Math.sin(M*rad)
+          + (0.019993 - 0.000101*T)*Math.sin(2*M*rad)
+          + 0.000289*Math.sin(3*M*rad);
+
+  // True longitude
+  const trueLong = L0 + C;
+
+  // Apparent longitude
+  const omega = 125.04 - 1934.136*T;
+  const lambda = trueLong - 0.00569 - 0.00478*Math.sin(omega*rad);
+
+  // Mean obliquity + corrected obliquity
+  const eps0 = 23 + (26 + ((21.448 - T*(46.815 + T*(0.00059 - T*0.001813))))/60)/60;
+  const eps = eps0 + 0.00256*Math.cos(omega*rad);
+
+  // Declination
+  const sinDec = Math.sin(eps*rad) * Math.sin(lambda*rad);
+  const dec = Math.asin(sinDec);
+
+  // Equation of time (minutes)
+  const y = Math.tan((eps*rad)/2); 
+  const y2 = y*y;
+
+  const sin2L0 = Math.sin(2*L0*rad);
+  const sinM  = Math.sin(M*rad);
+  const cos2L0 = Math.cos(2*L0*rad);
+  const sin4L0 = Math.sin(4*L0*rad);
+  const sin2M = Math.sin(2*M*rad);
+
+  const Etime = 4 * (y2*sin2L0 - 2*e*sinM + 4*e*y2*sinM*cos2L0 - 0.5*y2*y2*sin4L0 - 1.25*e*e*sin2M) * 180/Math.PI;
+
+  // True solar time (minutes)
+  const mins = dUtc.getUTCHours()*60 + dUtc.getUTCMinutes() + dUtc.getUTCSeconds()/60;
+  const tst = (mins + Etime + 4*lon) % 1440;
+
+  // Hour angle
+  let ha = (tst/4 < 0) ? (tst/4 + 180) : (tst/4 - 180);
+  ha = ha * rad;
+
+  const latR = lat * rad;
+  const cosZen = Math.sin(latR)*Math.sin(dec) + Math.cos(latR)*Math.cos(dec)*Math.cos(ha);
+  const zen = Math.acos(Math.max(-1, Math.min(1, cosZen)));
+  const elev = 90 - zen / rad;
+  return elev;
+}
+
+function isDaylightAt(lat, lon, dUtc){
+  return solarElevationDeg(lat, lon, dUtc) > 0;
+}
+
+function normalizeWxCode(s){
+  return (s || "").toUpperCase().replace(/\s+/g, " ").trim();
+}
+
+function pickWxEmoji(wxcodes, isDay){
+  // Priority-based parsing. Works even if multiple codes exist ("-SN BR").
+  const wx = normalizeWxCode(wxcodes);
+
+  // If no codes, treat as "clear/none"
+  if (!wx) return isDay ? "☀️" : "🌙";
+
+  // Thunder first
+  if (wx.includes("TS")) return "⛈️";
+
+  // Freezing rain / ice pellets
+  if (wx.includes("FZRA") || wx.includes("PL") || wx.includes("IC")) return "🧊";
+
+  // Snow / sleet / snow grains
+  if (wx.includes("SN") || wx.includes("SG")) return "🌨️";
+
+  // Rain / drizzle
+  if (wx.includes("RA") || wx.includes("DZ")) return "🌧️";
+
+  // Fog / mist / haze / smoke / blowing dust
+  if (wx.includes("FG") || wx.includes("BR") || wx.includes("HZ") || wx.includes("FU") || wx.includes("DU")) return "🌫️";
+
+  // Showers
+  if (wx.includes("SH")) return "🌦️";
+
+  // Default: cloud (unknown or other)
+  return "☁️";
+}
+
+function wxEmojiIcon(wxcodes, isDay, size=30){
+  const emoji = pickWxEmoji(wxcodes, isDay);
+  // Slightly larger emoji for readability; keep the circle consistent.
+  return L.divIcon({
+    className:"",
+    html:`<div class="dot"
+              style="width:${size}px;height:${size}px;
+                     background:rgba(255,255,255,0.92);
+                     border-color:#999;
+                     font-size:${Math.round(size*0.62)}px;
+                     line-height:1;">${emoji}</div>`,
+    iconSize:[size,size],
+    iconAnchor:[size/2,size/2]
+  });
+}
+function windArrowIcon(bearingDeg, mph){
+  const spd = (mph == null || !Number.isFinite(mph)) ? 0 : mph;
+  const color = windColorMph(spd);
+
+  const Lmin = 14, Lmax = 52;
+  const len = Math.max(Lmin, Math.min(Lmax, Lmin + spd * 0.65));
+
+  const w = 60, h = 60;
+  const cx = w/2, cy = h/2;
+
+  const svg = `
+    <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+      <g transform="translate(${cx},${cy})">
+        <line x1="0" y1="${len/2}" x2="0" y2="${-len/2}" stroke="${color}" stroke-width="4" stroke-linecap="round"/>
+        <polygon points="0,${-len/2-8} -8,${-len/2+6} 8,${-len/2+6}" fill="${color}"/>
+      </g>
+    </svg>
+  `;
+
+  return L.divIcon({
+    className:"",
+    html:`<div style="width:${w}px;height:${h}px;transform:rotate(${bearingDeg}deg);">
+            ${svg}
+          </div>`,
+    iconSize:[w,h],
+    iconAnchor:[w/2,h/2]
+  });
+}
+
+/* ------------------------------------------------------------
+   8) Helpers
+------------------------------------------------------------ */
+function num(v){
+  const s = (v ?? "").toString().trim();
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+function ktToMph(kt){ return kt == null ? null : (kt * 1.15078); }
+
+function parseVisMiles(raw){
+  if (raw == null) return { miles:null, label:"" };
+  let s = String(raw).trim();
+  if (!s) return { miles:null, label:"" };
+
+  if (s.startsWith("M")) s = s.slice(1);
+  s = s.replace(/\s+/g, " ");
+
+  const n = Number(s);
+  if (Number.isFinite(n)) return { miles:n, label:formatVisLabel(n) };
+
+  const parts = s.split(" ");
+  let whole = 0;
+  let frac = null;
+
+  if (parts.length === 2){
+    whole = Number(parts[0]);
+    frac = parts[1];
+  } else {
+    frac = parts[0];
+  }
+
+  if (frac && frac.includes("/")){
+    const [a,b] = frac.split("/").map(Number);
+    if (Number.isFinite(a) && Number.isFinite(b) && b !== 0){
+      const val = (Number.isFinite(whole) ? whole : 0) + (a/b);
+      return { miles:val, label:formatVisLabel(val) };
+    }
+  }
+  return { miles:null, label:String(raw).trim() };
+}
+function formatVisLabel(x){
+  if (!Number.isFinite(x)) return "";
+  if (x >= 10) return "10+";
+
+  const denom = 8;
+  const whole = Math.floor(x);
+  const frac = x - whole;
+  const nume = Math.round(frac * denom);
+
+  if (nume === 0) return String(whole);
+  if (nume === denom) return String(whole + 1);
+
+  const gcd = (a,b)=>b?gcd(b,a%b):a;
+  const g = gcd(nume, denom);
+  const n = nume / g;
+  const d = denom / g;
+
+  if (whole === 0) return `${n}/${d}`;
+  return `${whole} ${n}/${d}`;
+}
+
+function popupHTML(r, dAlt){
+  const tmp = num(r.tmpf);
+  const dew = num(r.dwpf);
+  const drct = num(r.drct);
+  const sknt = num(r.sknt);
+  const gust = num(r.gust);
+  const alti = num(r.alti);
+
+  const mph  = sknt != null ? Math.round(ktToMph(sknt)) : "—";
+  const gmh  = gust != null ? Math.round(ktToMph(gust)) : "—";
+  const altTxt = alti != null ? alti.toFixed(2) : "—";
+  const dTxt = (dAlt == null) ? "—" : `${dAlt > 0 ? "+" : ""}${dAlt.toFixed(2)} in/3h`;
+
+  const visObj = parseVisMiles(r.vsby);
+  const visTxt = (visObj.label || r.vsby || "—");
+
+  const toDir = (drct != null) ? ((drct + 180) % 360) : null;
+
+  return `
+    <div style="font:600 13px/1.3 Arial,sans-serif">
+      <div style="font-size:14px;margin-bottom:4px"><b>${r.station || "Station"}</b></div>
+      <div style="opacity:.85;margin-bottom:6px">Valid: ${r.valid || ""} UTC</div>
+      <div>Temp: <b>${tmp == null ? "—" : Math.round(tmp)}</b> °F</div>
+      <div>Dew Pt: <b>${dew == null ? "—" : Math.round(dew)}</b> °F</div>
+      <div>Wind: <b>${mph}</b> mph (gust <b>${gmh}</b>)</div>
+      <div>Wind dir (FROM): <b>${drct == null ? "—" : drct.toFixed(0)}°</b></div>
+      <div>Arrow points (TO): <b>${toDir == null ? "—" : toDir.toFixed(0)}°</b></div>
+      <div>Vis: <b>${visTxt}</b> mi</div>
+      <div>Altimeter: <b>${altTxt}</b> inHg</div>
+      <div>Alt trend (3h): <b>${dTxt}</b></div>
+      <div>Wx: <b>${(r.wxcodes || "").trim() || "—"}</b></div>
+    </div>
+  `;
+}
+
+/* ------------------------------------------------------------
+   9) METAR fetch
+------------------------------------------------------------ */
+const reportType = 3;
+const SD_ONLY = ["SD_ASOS"];
+const REST = ["MN_ASOS","IA_ASOS","NE_ASOS","ND_ASOS","WI_ASOS","IL_ASOS","MI_ASOS","MT_ASOS","WY_ASOS","KS_ASOS","MO_ASOS","CO_ASOS"];
+
+function asosURL(d, networks){
+  const iso = toISOZ(d);
+  return "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
+    + "?data=tmpf&data=dwpf&data=drct&data=sknt&data=gust&data=vsby&data=alti&data=wxcodes"
+    + `&network=${encodeURIComponent(networks.join(","))}`
+    + `&report_type=${reportType}`
+    + "&latlon=yes&format=onlycomma&tz=UTC"
+    + `&sts=${encodeURIComponent(iso)}`
+    + `&ets=${encodeURIComponent(iso)}`
+    + "&missing=empty";
+}
+
+function parseCSV(text){
+  const lines = text.split(/\r?\n/).filter(l => l.trim() && !l.startsWith("#"));
+  if (lines.length < 2) return [];
+  const header = lines[0].split(",");
+  return lines.slice(1).map(line => {
+    const cols = line.split(",");
+    const obj = {};
+    header.forEach((h,i)=>obj[h]=cols[i] ?? "");
+    return obj;
+  });
+}
+
+async function fetchRows(d, networks){
+  const resp = await fetch(asosURL(d, networks), { cache:"no-store" });
+  if (!resp.ok) throw new Error(`METAR HTTP ${resp.status}`);
+  return parseCSV(await resp.text());
+}
+
+/* ------------------------------------------------------------
+   10) Alerts styling + LOADER (UPDATED for your new filenames)
+------------------------------------------------------------ */
+const NWS_EVENT_COLOR = {
+  // Severe / Flood (from NWS Hazards Map colors)
+  "Tornado Warning": "#FF0000",
+  "Severe Thunderstorm Warning": "#FFA500",
+  "Flash Flood Warning": "#8B0000",
+  "Flash Flood Watch": "#2E8B57",
+  "Flood Warning": "#00FF00",
+  "Flood Advisory": "#00FF7F",
+  "Flood Watch": "#2E8B57",
+
+  // Winter
+  "Blizzard Warning": "#FF4500",
+  "Winter Storm Warning": "#FF69B4",
+  "Winter Storm Watch": "#4682B4",
+  "Winter Weather Advisory": "#7B68EE",
+  "Ice Storm Warning": "#8B008B",
+  "Snow Squall Warning": "#C71585",
+
+  // Wind / Other
+  "High Wind Warning": "#DAA520",
+  "Wind Advisory": "#D2B48C",
+  "Dense Fog Advisory": "#708090"
+};
+
+function pickProp(p, keys){
+  if (!p) return "";
+  for (const k of keys){
+    if (p[k] != null && String(p[k]).trim() !== "") return String(p[k]).trim();
+    const kk = Object.keys(p).find(x => x.toLowerCase() === k.toLowerCase());
+    if (kk && p[kk] != null && String(p[kk]).trim() !== "") return String(p[kk]).trim();
+  }
+  return "";
+}
+
+function eventNameFromProps(p){
+  const e = pickProp(p, ["event","headline","name","title"]);
+  if (e) return e;
+
+  const phen = pickProp(p, ["phenomena","phenom","PHENOM","phen"]);
+  const sig  = pickProp(p, ["significance","sig","SIG"]);
+  if (phen && sig){
+    const key = `${phen}.${sig}`.toUpperCase();
+    // Common VTEC phenom.sig -> human name
+    const MAP = {
+      'BZ.W':'Blizzard Warning',
+      'WS.W':'Winter Storm Warning',
+      'WS.A':'Winter Storm Watch',
+      'WW.Y':'Winter Weather Advisory',
+      'ZR.Y':'Freezing Rain Advisory',
+      'IS.W':'Ice Storm Warning',
+      'SQ.W':'Snow Squall Warning',
+
+      'TO.W':'Tornado Warning',
+      'TO.A':'Tornado Watch',
+      'SV.W':'Severe Thunderstorm Warning',
+      'SV.A':'Severe Thunderstorm Watch',
+      'FF.W':'Flash Flood Warning',
+      'FF.A':'Flash Flood Watch',
+      'FA.W':'Flood Warning',
+      'FA.Y':'Flood Advisory',
+      'FL.W':'Flood Warning',
+      'FL.Y':'Flood Advisory',
+
+      'MA.W':'Marine Warning',
+      'GL.W':'Gale Warning',
+      'SR.W':'Storm Warning'
+    };
+    if (MAP[key]) return MAP[key];
+    return key;
+  }
+
+  const wfo = pickProp(p, ["WFO","wfo"]);
+  const etn = pickProp(p, ["ETN","etn"]);
+  return (wfo || etn) ? `Alert ${wfo || ""} ${etn || ""}`.trim() : "Alert";
+}
+
+function colorForAlertName(name){
+  if (NWS_EVENT_COLOR[name]) return NWS_EVENT_COLOR[name];
+  const lower = String(name).toLowerCase();
+  if (lower.includes("blizzard") && lower.includes("warning")) return NWS_EVENT_COLOR["Blizzard Warning"];
+  if (lower.includes("winter storm") && lower.includes("warning")) return NWS_EVENT_COLOR["Winter Storm Warning"];
+  if (lower.includes("winter storm") && lower.includes("watch")) return NWS_EVENT_COLOR["Winter Storm Watch"];
+  if (lower.includes('winter weather') && lower.includes('advisory')) return NWS_EVENT_COLOR['Winter Weather Advisory'];
+  if (lower.includes('tornado') && lower.includes('warning')) return NWS_EVENT_COLOR['Tornado Warning'];
+  if (lower.includes('tornado') && lower.includes('watch')) return NWS_EVENT_COLOR['Tornado Watch'];
+  if (lower.includes('severe thunderstorm') && lower.includes('warning')) return NWS_EVENT_COLOR['Severe Thunderstorm Warning'];
+  if (lower.includes('severe thunderstorm') && lower.includes('watch')) return NWS_EVENT_COLOR['Severe Thunderstorm Watch'];
+  if (lower.includes('flash flood') && lower.includes('warning')) return NWS_EVENT_COLOR['Flash Flood Warning'];
+  if (lower.includes('flash flood') && lower.includes('watch')) return NWS_EVENT_COLOR['Flash Flood Watch'];
+  if (lower == 'flood warning') return NWS_EVENT_COLOR['Flood Warning'];
+  if (lower == 'flood advisory') return NWS_EVENT_COLOR['Flood Advisory'];
+  return '#CC0000'; // fallback
+
+}
+
+// NEW (your repo): alerts_20180414_0000Z.geojson
+function alertsFileCompactHourly(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `./alerts_${Y}${M}${D}_${H}00Z.geojson`;
+}
+
+// OLD (your repo): alerts_2018-04-14T21Z.geojson
+function alertsFileOldDash(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `./alerts_${Y}-${M}-${D}T${H}Z.geojson`;
+}
+
+// Extra fallback (sometimes people store T2100Z)
+function alertsFileOldWithMinutes(d){
+  const Y = d.getUTCFullYear();
+  const M = String(d.getUTCMonth()+1).padStart(2,"0");
+  const D = String(d.getUTCDate()).padStart(2,"0");
+  const H = String(d.getUTCHours()).padStart(2,"0");
+  return `./alerts_${Y}-${M}-${D}T${H}00Z.geojson`;
+}
+
+async function fetchFirstOk(urls){
+  let lastErr = "";
+  for (const u of urls){
+    try{
+      const r = await fetch(u, { cache:"no-store" });
+      if (!r.ok) { lastErr = `HTTP ${r.status}`; continue; }
+      const gj = await r.json();
+      return { url: u, gj };
+    } catch(e){
+      lastErr = e.message || String(e);
+    }
+  }
+  throw new Error(lastErr || "No alert file matched");
+}
+
+async function loadAlerts(){
+  if (!map.hasLayer(alertsLayer)) return;
+
+  // If you have a timeline_index.json + timeline_hourly/*.geojson, use it.
+  const snapped = snapCurrentToAlertsTimeline();
+
+  let candidates = [];
+  if (snapped && snapped.file){
+    candidates = [ './' + snapped.file.replace(/^\.\//, '') ];
+  } else {
+    // Backward compatibility: try legacy naming patterns
+    candidates = [
+      alertsFileCompactHourly(current),
+      alertsFileOldDash(current),
+      alertsFileOldWithMinutes(current)
+    ];
+  }
+
+  try{
+    const { url, gj } = await fetchFirstOk(candidates);
+
+    alertsLayer.clearLayers();
+
+    let polyCount = 0;
+    L.geoJSON(gj, {
+      style: (feat) => {
+        const p = feat.properties || {};
+        const name = eventNameFromProps(p);
+        const c = colorForAlertName(name);
+        return { weight:2, color:c, fillColor:c, fillOpacity:0.18 };
+      },
+      onEachFeature: (feat, layer) => {
+        polyCount++;
+        const p = feat.properties || {};
+        const name = eventNameFromProps(p);
+        const c = colorForAlertName(name);
+
+        const wfo = pickProp(p, ['WFO','wfo']);
+        const etn = pickProp(p, ['ETN','etn']);
+        const status = pickProp(p, ['STATUS','status']);
+        const issued = pickProp(p, ['issuance','issued','onset','ISSUANCE','ISSUED','ISSUE']);
+        const expire = pickProp(p, ['expire','expires','end','EXPIRE','EXPIRES']);
+
+        const lines = [];
+        lines.push(`<div><span class="swatch" style="background:${c}"></span><b>${name}</b></div>`);
+        if (wfo || etn) lines.push(`Office/Event: <b>${wfo || '—'}</b> / <b>${etn || '—'}</b>`);
+        if (status) lines.push(`Status: <b>${status}</b>`);
+        if (issued) lines.push(`Issued: <b>${issued}</b>`);
+        if (expire) lines.push(`Expires: <b>${expire}</b>`);
+
+        layer.bindPopup(lines.join('<br>'));
+      }
+    }).eachLayer(l => alertsLayer.addLayer(l));
+
+    // Confirm which file loaded + how many polygons
+    const short = url.replace('./','');
+    setStatus(`Alerts loaded: ${short} | polygons: ${polyCount}`);
+
+  } catch(e){
+    console.warn('Alerts load failed:', e.message);
+    alertsLayer.clearLayers();
+    setStatus('Alerts not found for this hour (check filenames).');
+  }
+}
+
+/* ------------------------------------------------------------
+   11) Daily particles (toggle + day buttons)
+------------------------------------------------------------ */
+function particlesFileForDay(dayNum){
+  return `./wind_particles_201804${String(dayNum).padStart(2,"0")}.json`;
+}
 
 
-// 2) Wrapper {data:[...records...]}
+function normalizeVelocityJson(raw, opts={}){
+  // Accept:
+  // 1) Array of windy records [{header,data},{header,data}]
+  // 2) Wrapper {data:[...records...]}
   // 3) Single record with interleaved u/v pairs in one record: data.length = nx*ny*2
   //
   // opts.flipDyPositive:
@@ -899,7 +1761,33 @@ async function refreshParticlesIfOn(){
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const raw = await r.json();
-    const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
+// If Colab already wrote 2-record leaflet-velocity JSON (u + v), use it directly.
+if (Array.isArray(raw) && raw.length === 2 && raw[0]?.header?.shortName && raw[1]?.header?.shortName){
+  const a0 = raw[0].header.shortName;
+  const a1 = raw[1].header.shortName;
+  if ((a0 === "u" && a1 === "v") || (a0 === "v" && a1 === "u")){
+    const records = (a0 === "u") ? raw : [raw[1], raw[0]];
+    if (jetLayer){ try{ map.removeLayer(jetLayer); }catch(_){ } jetLayer = null; }
+    jetLayer = L.velocityLayer({
+      data: records,
+      displayValues: true,
+      displayOptions: {
+        velocityType: "250mb Wind",
+        displayPosition: "bottomleft",
+        displayEmptyString: "No wind data"
+      },
+      maxVelocity: 160,
+      velocityScale: 0.015,
+      particleAge: 90,
+      particleMultiplier: 1/900,
+      lineWidth: 1.6,
+      opacity: 0.90
+    });
+    jetLayer.addTo(map);
+    setStatus(`Jet stream loaded (u/v): ${url.replace("./","")}`);
+    return;
+  }
+}    const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
 
     if (particlesLayer){
       try { map.removeLayer(particlesLayer); } catch(_) {}
@@ -925,12 +1813,6 @@ async function refreshParticlesIfOn(){
     });
 
     particlesLayer.addTo(map);
-  setTimeout(() => resyncVelocityLayer(particlesLayer), 50);
-    attachVelocityContainerToOverlay(particlesLayer);
-    setTimeout(updateBannerOffset, 60);
-    // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityContainerToOverlay(particlesLayer);
-  resyncVelocityLayer(particlesLayer); }, 60);
     setStatus(`Particles loaded: ${url.replace("./","")}`);
 
   } catch(e){
@@ -939,7 +1821,6 @@ async function refreshParticlesIfOn(){
   }
 }
 
-let _jetFetchInFlight = null;
 async function refreshJetIfOn(){
   if (!map.hasLayer(jetToggle)) return;
 
@@ -948,111 +1829,31 @@ async function refreshJetIfOn(){
     return;
   }
 
-  // Use the clean filename in ./jetstream/
-  const JET_URL = "./jetstream/era5_wind_250hPa_20180411_12z_mercator.json";
+  const JET_FILES = [
+    "era5_wind_250hPa_20180411_12z_latlon_fixed.json",
+    "era5_wind_250hPa_20180411_12z_mercator.json",
+    "era5_wind_250hPa_20180410_12z_latlon_fixed.json",
+    "era5_wind_250hPa_20180410_12z_mercator.json"
+  ];
+
+  // Prefer the clean filename, but fall back if needed.
+  let url = "./jetstream/" + encodeURI(JET_FILES[0]);
+
+  // Some hosts block HEAD; we try a fast existence check and fall back.
+  for (const f of JET_FILES){
+    const testUrl = "./jetstream/" + encodeURI(f);
+    try{
+      const head = await fetch(testUrl, { method:"HEAD", cache:"no-store" });
+      if (head.ok){ url = testUrl; break; }
+    }catch(_){ /* ignore */ }
+  }
 
   try{
-    const r = await fetch(JET_URL, { cache:"no-store" });
+    const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
 
     const raw = await r.json();
-
-    // Support: [{header,data}], {data:[...]}, or a single record
-    const arr = Array.isArray(raw) ? raw : (raw && raw.data ? raw.data : [raw]);
-    if (!arr || arr.length === 0) throw new Error("Empty jet stream JSON");
-
-    const rec0 = arr[0];
-    if (!rec0.header || !rec0.data) throw new Error("Jet stream JSON missing header/data");
-
-    const h = rec0.header;
-    const nx = Number(h.nx ?? h.Nx);
-    const ny = Number(h.ny ?? h.Ny);
-    const dxIn = Number(h.dx);
-    const dyIn = Number(h.dy);
-    const lo1 = Number(h.lo1);
-    const la1_in = Number(h.la1);
-
-    if (!Number.isFinite(nx) || !Number.isFinite(ny) || nx <= 0 || ny <= 0) throw new Error("Bad nx/ny in header");
-    if (!Number.isFinite(dxIn) || !Number.isFinite(dyIn) || dxIn === 0 || dyIn === 0) throw new Error("Bad dx/dy in header");
-
-    const expectedLen = nx * ny * 2; // interleaved u/v
-    if (rec0.data.length !== expectedLen){
-      throw new Error(`Data length mismatch: expected ${expectedLen}, got ${rec0.data.length}`);
-    }
-
-    const n = nx * ny;
-
-    // Split interleaved u/v
-    let u = new Float32Array(n);
-    let v = new Float32Array(n);
-    for (let i = 0, j = 0; i < n; i++, j += 2){
-      u[i] = rec0.data[j];
-      v[i] = rec0.data[j + 1];
-    }
-
-    // ----- CRITICAL: leaflet-velocity expects a NORTH->SOUTH grid -----
-    // Many ERA5 exports come as SOUTH->NORTH (la1 is the southern edge and dy is positive).
-    // If so, flip rows so index 0 is the northernmost row, and make dy negative.
-    const laEnd = la1_in + dyIn * (ny - 1);
-    const southToNorth = la1_in < laEnd; // true when la increases as row index increases
-
-    const dx = Math.abs(dxIn);
-    const dy = -Math.abs(dyIn); // force north->south
-
-    let laNorth = Math.max(la1_in, laEnd);
-    let laSouth = Math.min(la1_in, laEnd);
-
-    if (southToNorth){
-      const uFlip = new Float32Array(n);
-      const vFlip = new Float32Array(n);
-      for (let y = 0; y < ny; y++){
-        const srcRow = (ny - 1 - y) * nx;
-        const dstRow = y * nx;
-        uFlip.set(u.subarray(srcRow, srcRow + nx), dstRow);
-        vFlip.set(v.subarray(srcRow, srcRow + nx), dstRow);
-      }
-      u = uFlip;
-      v = vFlip;
-    }
-
-    // Build headers in the format leaflet-velocity expects
-    // lo2/ la2 are optional but helpful for debugging; dy must be negative.
-    const lo2 = lo1 + dx * (nx - 1);
-    const baseHeader = {
-      lo1: lo1,
-      la1: laNorth,
-      dx: dx,
-      dy: dy,
-      nx: nx,
-      ny: ny,
-      lo2: lo2,
-      la2: laSouth,
-      refTime: h.refTime || h.ref_time || h.time || null
-    };
-
-    const uRecord = {
-      header: {
-        ...baseHeader,
-        parameterCategory: 2,
-        parameterNumber: 2,
-        parameterNumberName: "u_component_of_wind",
-        parameterUnit: "m/s",
-        shortName: "u"
-      },
-      data: Array.from(u)
-    };
-
-    const vRecord = {
-      header: {
-        ...baseHeader,
-        parameterCategory: 2,
-        parameterNumber: 3,
-        parameterNumberName: "v_component_of_wind",
-        parameterUnit: "m/s",
-        shortName: "v"
-      },
-      data: Array.from(v)
-    };
+    const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
 
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
@@ -1060,7 +1861,7 @@ async function refreshJetIfOn(){
     }
 
     jetLayer = L.velocityLayer({
-      data: [uRecord, vRecord],
+      data: velData,
       displayValues: true,
       displayOptions: {
         velocityType: "250mb Wind",
@@ -1068,7 +1869,7 @@ async function refreshJetIfOn(){
         displayEmptyString: "No wind data"
       },
       maxVelocity: 160,
-      velocityScale: 0.015,
+      velocityScale: 0.02,
       particleAge: 90,
       particleMultiplier: 1/900,
       lineWidth: 1.6,
@@ -1076,17 +1877,10 @@ async function refreshJetIfOn(){
     });
 
     jetLayer.addTo(map);
-
-    // Make sure the velocity canvas lives inside the Leaflet overlayPane.
-    // (Some builds of leaflet-velocity attach to <body> which draws above the map.)
-    try{ forceVelocityIntoMap(jetLayer); }catch(_){}
-    try{ map.invalidateSize(true); }catch(_){}
-
-    setStatus("Jet stream loaded.");
-    console.log("Jet stream header (normalized):", baseHeader);
+    setStatus(`Jet stream loaded: ${url.replace("./","")}`);
   }catch(e){
-    console.error("Jet stream error:", e);
-    setStatus(`Jet stream failed: ${e.message}`);
+    console.warn("Jet stream failed:", url, e.message);
+    setStatus(`Jet stream not found / not readable: ${url.replace("./","")}`);
   }
 }
 
@@ -1294,37 +2088,17 @@ refreshAll().catch(err => {
 });
 </script>
 
-
-
-
 <script>
 (function(){
   function updateBannerOffset(){
     const b = document.getElementById('banner');
     if(!b) return;
     document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 8) + 'px');
-    // If Leaflet map exists, force a resize so overlays (incl. velocity) align.
-    if (window.map && typeof window.map.invalidateSize === 'function'){
-      window.map.invalidateSize(true);
-    }
   }
-  window.addEventListener('load', updateBannerOffset);
+  window.updateBannerOffset = updateBannerOffset;
+  updateBannerOffset();
   window.addEventListener('resize', updateBannerOffset);
 })();
-</script>
-
-
-<script>
-  // Keep Leaflet + leaflet-velocity aligned even with the overlay banner.
-  window.addEventListener('load', () => {
-    const b = document.querySelector('.tvbanner');
-    if (b) {
-      document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 10) + 'px');
-    }
-    if (window.map && typeof window.map.invalidateSize === 'function') {
-      setTimeout(() => window.map.invalidateSize(true), 50);
-    }
-  });
 </script>
 
 </body>
