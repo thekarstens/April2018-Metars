@@ -2089,7 +2089,7 @@ async function refreshJetIfOn(){
 
     // --- OPTIONAL: crop the global ERA5 grid to keep the lesson focused (and avoid edge/wrap issues) ---
     // If you want FULL-GLOBE particles, set CROP_JET = false.
-    const CROP_JET = true;
+    const CROP_JET = false;
     if (CROP_JET){
       // North America-friendly box (tweak anytime)
       const CROP_W = -170, CROP_E = -40, CROP_S = 15, CROP_N = 75;
