@@ -1953,7 +1953,49 @@ async function refreshParticlesIfOn(){
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const raw = await r.json();
-    const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
+
+    // If the file is already in leaflet-velocity format (two records: u + v), use it directly.
+    if (Array.isArray(raw) && raw.length === 2 && raw[0]?.header && raw[1]?.header && Array.isArray(raw[0]?.data) && Array.isArray(raw[1]?.data)) {
+      // Normalize header orientation: leaflet-velocity expects la1 (north) with negative dy.
+      const norm = (rec) => {
+        const h = rec.header || {};
+        const nx = h.nx || h.Nx, ny = h.ny || h.Ny;
+        if (!nx || !ny) return rec;
+        const dy = h.dy;
+        // If la1 is south or dy is positive, flip to north-to-south.
+        if ((typeof dy === "number" && dy > 0) || (typeof h.la1 === "number" && typeof h.la2 === "number" && h.la1 < h.la2)) {
+          const data = rec.data;
+          const flipped = new Array(nx * ny);
+          for (let y = 0; y < ny; y++){
+            const src = y * nx;
+            const dst = (ny - 1 - y) * nx;
+            for (let x = 0; x < nx; x++){
+              flipped[dst + x] = data[src + x];
+            }
+          }
+          rec = { ...rec, data: flipped, header: { ...h, la1: h.la2, la2: h.la1, dy: -Math.abs(dy || 0) } };
+        }
+        return rec;
+      };
+      const uRec = norm(raw[0]);
+      const vRec = norm(raw[1]);
+
+      if (jetLayer){ try{ map.removeLayer(jetLayer); }catch(_){ } jetLayer = null; }
+
+      jetLayer = L.velocityLayer({
+        data: [uRec, vRec],
+        displayValues: true,
+        displayOptions: { velocityType: "250mb Wind", displayPosition: "bottomleft", displayEmptyString: "No wind data" },
+        maxVelocity: 160, velocityScale: 0.015, particleAge: 90, particleMultiplier: 1/900, lineWidth: 1.6, opacity: 0.90
+      });
+
+      jetLayer.addTo(map);
+      setStatus(`Jet stream loaded: ${url.replace("./","")}`);
+      console.log("Jet stream layer added (preformatted file).");
+      return;
+    }
+
+const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
 
     if (particlesLayer){
       try { map.removeLayer(particlesLayer); } catch(_) {}
@@ -2131,12 +2173,7 @@ async function refreshJetIfOn(){
 
     jetLayer.addTo(map);
 
-    
-    // Make sure Leaflet has correct sizes before velocity starts drawing
-    map.invalidateSize(true);
-    _relocateVelocityDom();
-    setTimeout(() => { try{ map.invalidateSize(true); _relocateVelocityDom(); }catch(_){} }, 150);
-// Make sure the velocity canvas lives inside the Leaflet overlayPane.
+    // Make sure the velocity canvas lives inside the Leaflet overlayPane.
     // (Some builds of leaflet-velocity attach to <body> which draws above the map.)
     try{ forceVelocityIntoMap(jetLayer); }catch(_){}
     try{ map.invalidateSize(true); }catch(_){}
