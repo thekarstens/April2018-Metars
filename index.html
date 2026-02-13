@@ -2131,7 +2131,12 @@ async function refreshJetIfOn(){
 
     jetLayer.addTo(map);
 
-    // Make sure the velocity canvas lives inside the Leaflet overlayPane.
+    
+    // Make sure Leaflet has correct sizes before velocity starts drawing
+    map.invalidateSize(true);
+    _relocateVelocityDom();
+    setTimeout(() => { try{ map.invalidateSize(true); _relocateVelocityDom(); }catch(_){} }, 150);
+// Make sure the velocity canvas lives inside the Leaflet overlayPane.
     // (Some builds of leaflet-velocity attach to <body> which draws above the map.)
     try{ forceVelocityIntoMap(jetLayer); }catch(_){}
     try{ map.invalidateSize(true); }catch(_){}
