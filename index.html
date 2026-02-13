@@ -674,6 +674,8 @@ function _relocateVelocityDom(){
     const overlayPane = map.getPanes().overlayPane;
     if (!overlayPane) return;
 
+    const mapSize = map.getSize ? map.getSize() : null;
+
     const selectors = [
       ".leaflet-velocity-layer",
       ".leaflet-velocity-container",
@@ -684,17 +686,29 @@ function _relocateVelocityDom(){
 
     document.querySelectorAll(selectors.join(",")).forEach((node) => {
       if (!node) return;
-      // If node isn't already in the map container, move it.
-      if (!map.getContainer().contains(node)){
-        overlayPane.appendChild(node);
-      } else if (node.parentElement !== overlayPane && node.tagName === "CANVAS"){
+
+      // Always ensure velocity DOM lives inside overlayPane (Leaflet's transformed pane),
+      // otherwise it will draw at the top of the page (especially with a fixed banner).
+      if (node.parentElement !== overlayPane){
         overlayPane.appendChild(node);
       }
+
+      // Force absolute positioning relative to overlayPane
       node.style.position = "absolute";
       node.style.left = "0";
       node.style.top = "0";
       node.style.pointerEvents = "none";
       node.style.zIndex = "350";
+
+      // If it's a canvas, sync its backing size to the map size
+      if (mapSize && node.tagName === "CANVAS"){
+        const w = Math.max(1, Math.round(mapSize.x));
+        const h = Math.max(1, Math.round(mapSize.y));
+        if (node.width !== w) node.width = w;
+        if (node.height !== h) node.height = h;
+        node.style.width = w + "px";
+        node.style.height = h + "px";
+      }
     });
   }catch(e){
     console.warn("velocity DOM relocate failed:", e);
@@ -2348,6 +2362,7 @@ refreshAll().catch(err => {
       window.map.invalidateSize(true);
     }
   }
+  window.updateBannerOffset = updateBannerOffset;
   window.addEventListener('load', updateBannerOffset);
   window.addEventListener('resize', updateBannerOffset);
 })();
