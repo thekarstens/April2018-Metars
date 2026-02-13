@@ -1988,79 +1988,85 @@ async function refreshJetIfOn(){
     return;
   }
 
-  // Prefer the clean filename in ./jetstream/
+  // Use the clean filename in ./jetstream/
   const JET_URL = "./jetstream/era5_wind_250hPa_20180410_12z_mercator.json";
 
   try{
     const r = await fetch(JET_URL, { cache:"no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
 
-    const raw = await r.json(); // expected: [{header:{...}, data:[u0,v0,u1,v1,...]}]
-    const rec = Array.isArray(raw) ? raw[0] : raw;
+    const raw = await r.json();
 
-    if (!rec || !rec.header || !rec.data) throw new Error("Invalid jet JSON: missing header/data");
-    const h = rec.header;
+    // Support: [{header,data}], {data:[...]}, or a single record
+    const arr = Array.isArray(raw) ? raw : (raw && raw.data ? raw.data : [raw]);
+    if (!arr || arr.length === 0) throw new Error("Empty jet stream JSON");
 
-    const nx = Number(h.nx || h.Nx);
-    const ny = Number(h.ny || h.Ny);
-    if (!nx || !ny) throw new Error("Missing nx/ny in header");
+    const rec0 = arr[0];
+    if (!rec0.header || !rec0.data) throw new Error("Jet stream JSON missing header/data");
 
-    const inter = rec.data;
+    const h = rec0.header;
+    const nx = Number(h.nx ?? h.Nx);
+    const ny = Number(h.ny ?? h.Ny);
+    const dxIn = Number(h.dx);
+    const dyIn = Number(h.dy);
+    const lo1 = Number(h.lo1);
+    const la1_in = Number(h.la1);
+
+    if (!Number.isFinite(nx) || !Number.isFinite(ny) || nx <= 0 || ny <= 0) throw new Error("Bad nx/ny in header");
+    if (!Number.isFinite(dxIn) || !Number.isFinite(dyIn) || dxIn === 0 || dyIn === 0) throw new Error("Bad dx/dy in header");
+
+    const expectedLen = nx * ny * 2; // interleaved u/v
+    if (rec0.data.length !== expectedLen){
+      throw new Error(`Data length mismatch: expected ${expectedLen}, got ${rec0.data.length}`);
+    }
+
     const n = nx * ny;
-    const expectedLen = n * 2;
-    if (!Array.isArray(inter) || inter.length !== expectedLen){
-      throw new Error(`Data length mismatch: expected ${expectedLen}, got ${inter?.length ?? "?"}`);
+
+    // Split interleaved u/v
+    let u = new Float32Array(n);
+    let v = new Float32Array(n);
+    for (let i = 0, j = 0; i < n; i++, j += 2){
+      u[i] = rec0.data[j];
+      v[i] = rec0.data[j + 1];
     }
 
-    // 1) split interleaved u/v
-    const u = new Float32Array(n);
-    const v = new Float32Array(n);
-    for (let i=0, j=0; i<n; i++, j+=2){
-      u[i] = inter[j];
-      v[i] = inter[j+1];
-    }
+    // ----- CRITICAL: leaflet-velocity expects a NORTH->SOUTH grid -----
+    // Many ERA5 exports come as SOUTH->NORTH (la1 is the southern edge and dy is positive).
+    // If so, flip rows so index 0 is the northernmost row, and make dy negative.
+    const laEnd = la1_in + dyIn * (ny - 1);
+    const southToNorth = la1_in < laEnd; // true when la increases as row index increases
 
-    // 2) leaflet-velocity expects GRIB-style orientation:
-    //    la1 = NW corner (north), dy negative (north->south)
-    // Your file is south->north (la1=-85, dy=+0.5), so we flip rows.
-    let la1 = Number(h.la1);
-    let lo1 = Number(h.lo1);
-    let dx  = Number(h.dx);
-    let dy  = Number(h.dy);
+    const dx = Math.abs(dxIn);
+    const dy = -Math.abs(dyIn); // force north->south
 
-    if (!isFinite(la1) || !isFinite(lo1) || !isFinite(dx) || !isFinite(dy)){
-      throw new Error("Header has non-numeric la1/lo1/dx/dy");
-    }
+    let laNorth = Math.max(la1_in, laEnd);
+    let laSouth = Math.min(la1_in, laEnd);
 
-    // If dy is positive, the first row is southernmost; flip to north-first.
-    if (dy > 0){
+    if (southToNorth){
       const uFlip = new Float32Array(n);
       const vFlip = new Float32Array(n);
-      for (let y=0; y<ny; y++){
+      for (let y = 0; y < ny; y++){
         const srcRow = (ny - 1 - y) * nx;
         const dstRow = y * nx;
-        for (let x=0; x<nx; x++){
-          const s = srcRow + x;
-          const d = dstRow + x;
-          uFlip[d] = u[s];
-          vFlip[d] = v[s];
-        }
+        uFlip.set(u.subarray(srcRow, srcRow + nx), dstRow);
+        vFlip.set(v.subarray(srcRow, srcRow + nx), dstRow);
       }
-      u.set(uFlip);
-      v.set(vFlip);
-
-      // north edge latitude becomes la1 + dy*(ny-1); dy becomes negative
-      la1 = la1 + dy * (ny - 1);
-      dy = -dy;
+      u = uFlip;
+      v = vFlip;
     }
 
-    // Build GRIB-like u/v records that leaflet-velocity understands.
-    const la2 = la1 + dy * (ny - 1);
+    // Build headers in the format leaflet-velocity expects
+    // lo2/ la2 are optional but helpful for debugging; dy must be negative.
     const lo2 = lo1 + dx * (nx - 1);
-
     const baseHeader = {
-      lo1, la1, lo2, la2,
-      dx, dy, nx, ny,
+      lo1: lo1,
+      la1: laNorth,
+      dx: dx,
+      dy: dy,
+      nx: nx,
+      ny: ny,
+      lo2: lo2,
+      la2: laSouth,
       refTime: h.refTime || h.ref_time || h.time || null
     };
 
@@ -2070,9 +2076,10 @@ async function refreshJetIfOn(){
         parameterCategory: 2,
         parameterNumber: 2,
         parameterNumberName: "u_component_of_wind",
-        parameterUnit: "m/s"
+        parameterUnit: "m/s",
+        shortName: "u"
       },
-      data: Array.from(u) // leaflet-velocity expects plain arrays
+      data: Array.from(u)
     };
 
     const vRecord = {
@@ -2081,70 +2088,12 @@ async function refreshJetIfOn(){
         parameterCategory: 2,
         parameterNumber: 3,
         parameterNumberName: "v_component_of_wind",
-        parameterUnit: "m/s"
+        parameterUnit: "m/s",
+        shortName: "v"
       },
       data: Array.from(v)
     };
 
-
-    // --- OPTIONAL: crop the global ERA5 grid to keep the lesson focused (and avoid edge/wrap issues) ---
-    // If you want FULL-GLOBE particles, set CROP_JET = false.
-    const CROP_JET = false;
-    if (CROP_JET){
-      // North America-friendly box (tweak anytime)
-      const CROP_W = -170, CROP_E = -40, CROP_S = 15, CROP_N = 75;
-
-      // We assume a regular lat/lon grid after the flip (dy should be negative, la1 should be north edge)
-      const H = uRecord.header;
-      const dx2 = H.dx, dy2 = H.dy, nx2 = H.nx, ny2 = H.ny;
-      const lo1b = H.lo1, la1b = H.la1;
-
-      // Normalize longitudes into the same -180..180 space as lo1
-      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-      const xFromLon = (lon) => Math.round((lon - lo1b) / dx2);
-      const yFromLat = (lat) => Math.round((la1b - lat) / Math.abs(dy2)); // dy2 is negative
-
-      let x0 = clamp(xFromLon(CROP_W), 0, nx2-1);
-      let x1 = clamp(xFromLon(CROP_E), 0, nx2-1);
-      let y0 = clamp(yFromLat(CROP_N), 0, ny2-1);
-      let y1 = clamp(yFromLat(CROP_S), 0, ny2-1);
-
-      if (x1 < x0){ const t=x0; x0=x1; x1=t; }
-      if (y1 < y0){ const t=y0; y0=y1; y1=t; }
-
-      const newNx = (x1 - x0 + 1);
-      const newNy = (y1 - y0 + 1);
-
-      const cropField = (arr) => {
-        const out = new Array(newNx * newNy);
-        let k = 0;
-        for (let y = y0; y <= y1; y++){
-          const row = y * nx2;
-          for (let x = x0; x <= x1; x++){
-            out[k++] = arr[row + x];
-          }
-        }
-        return out;
-      };
-
-      uRecord.data = cropField(uRecord.data);
-      vRecord.data = cropField(vRecord.data);
-
-      // Update headers to match the cropped grid
-      const newLo1 = lo1b + dx2 * x0;
-      const newLa1 = la1b + dy2 * y0; // dy2 negative
-      const newLo2 = newLo1 + dx2 * (newNx - 1);
-      const newLa2 = newLa1 + dy2 * (newNy - 1);
-
-      [uRecord, vRecord].forEach(rec => {
-        rec.header = {
-          ...rec.header,
-          lo1: newLo1, la1: newLa1, lo2: newLo2, la2: newLa2,
-          nx: newNx, ny: newNy,
-          dx: dx2, dy: dy2
-        };
-      });
-    }
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
       jetLayer = null;
@@ -2168,9 +2117,13 @@ async function refreshJetIfOn(){
 
     jetLayer.addTo(map);
 
-    setStatus("Jet stream loaded.");
-    console.log("Jet OK", {nx, ny, la1, lo1, dx, dy});
+    // Make sure the velocity canvas lives inside the Leaflet overlayPane.
+    // (Some builds of leaflet-velocity attach to <body> which draws above the map.)
+    try{ forceVelocityIntoMap(jetLayer); }catch(_){}
+    try{ map.invalidateSize(true); }catch(_){}
 
+    setStatus("Jet stream loaded.");
+    console.log("Jet stream header (normalized):", baseHeader);
   }catch(e){
     console.error("Jet stream error:", e);
     setStatus(`Jet stream failed: ${e.message}`);
