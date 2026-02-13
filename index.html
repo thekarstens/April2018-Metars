@@ -2055,8 +2055,12 @@ async function refreshJetIfOn(){
     }
 
     // Build GRIB-like u/v records that leaflet-velocity understands.
+    const la2 = la1 + dy * (ny - 1);
+    const lo2 = lo1 + dx * (nx - 1);
+
     const baseHeader = {
-      lo1, la1, dx, dy, nx, ny,
+      lo1, la1, lo2, la2,
+      dx, dy, nx, ny,
       refTime: h.refTime || h.ref_time || h.time || null
     };
 
@@ -2082,6 +2086,65 @@ async function refreshJetIfOn(){
       data: Array.from(v)
     };
 
+
+    // --- OPTIONAL: crop the global ERA5 grid to keep the lesson focused (and avoid edge/wrap issues) ---
+    // If you want FULL-GLOBE particles, set CROP_JET = false.
+    const CROP_JET = true;
+    if (CROP_JET){
+      // North America-friendly box (tweak anytime)
+      const CROP_W = -170, CROP_E = -40, CROP_S = 15, CROP_N = 75;
+
+      // We assume a regular lat/lon grid after the flip (dy should be negative, la1 should be north edge)
+      const H = uRecord.header;
+      const dx2 = H.dx, dy2 = H.dy, nx2 = H.nx, ny2 = H.ny;
+      const lo1b = H.lo1, la1b = H.la1;
+
+      // Normalize longitudes into the same -180..180 space as lo1
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+      const xFromLon = (lon) => Math.round((lon - lo1b) / dx2);
+      const yFromLat = (lat) => Math.round((la1b - lat) / Math.abs(dy2)); // dy2 is negative
+
+      let x0 = clamp(xFromLon(CROP_W), 0, nx2-1);
+      let x1 = clamp(xFromLon(CROP_E), 0, nx2-1);
+      let y0 = clamp(yFromLat(CROP_N), 0, ny2-1);
+      let y1 = clamp(yFromLat(CROP_S), 0, ny2-1);
+
+      if (x1 < x0){ const t=x0; x0=x1; x1=t; }
+      if (y1 < y0){ const t=y0; y0=y1; y1=t; }
+
+      const newNx = (x1 - x0 + 1);
+      const newNy = (y1 - y0 + 1);
+
+      const cropField = (arr) => {
+        const out = new Array(newNx * newNy);
+        let k = 0;
+        for (let y = y0; y <= y1; y++){
+          const row = y * nx2;
+          for (let x = x0; x <= x1; x++){
+            out[k++] = arr[row + x];
+          }
+        }
+        return out;
+      };
+
+      uRecord.data = cropField(uRecord.data);
+      vRecord.data = cropField(vRecord.data);
+
+      // Update headers to match the cropped grid
+      const newLo1 = lo1b + dx2 * x0;
+      const newLa1 = la1b + dy2 * y0; // dy2 negative
+      const newLo2 = newLo1 + dx2 * (newNx - 1);
+      const newLa2 = newLa1 + dy2 * (newNy - 1);
+
+      [uRecord, vRecord].forEach(rec => {
+        rec.header = {
+          ...rec.header,
+          lo1: newLo1, la1: newLa1, lo2: newLo2, la2: newLa2,
+          nx: newNx, ny: newNy,
+          dx: dx2, dy: dy2
+        };
+      });
+    }
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
       jetLayer = null;
