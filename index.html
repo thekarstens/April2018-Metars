@@ -1854,6 +1854,105 @@ async function refreshJetIfOn(){
 
     const raw = await r.json();
     const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
+    // --- TEMP CROPPING FIX ---
+    // If the global grid is being positioned incorrectly (common when headers/projection metadata
+    // don't match what leaflet-velocity expects), cropping to a northern-hemisphere window can
+    // "anchor" the layer so it at least plots on-map. We'll widen once placement is correct.
+    function cropWindRecords(records, box){
+      // records: [uRec, vRec] with regular lat/lon grid
+      if (!Array.isArray(records) || records.length < 2) return records;
+
+      function normHeader(h){
+        const nx = h.nx ?? h.Nx;
+        const ny = h.ny ?? h.Ny;
+        const dx = h.dx ?? h.Dx;
+        const dy = h.dy ?? h.Dy;
+        const la1 = h.la1 ?? h.La1;
+        const lo1 = h.lo1 ?? h.Lo1;
+        const la2 = (h.la2 ?? h.La2) ?? (typeof la1==="number" && typeof dy==="number" && typeof ny==="number" ? (la1 + dy*(ny-1)) : undefined);
+        const lo2 = (h.lo2 ?? h.Lo2) ?? (typeof lo1==="number" && typeof dx==="number" && typeof nx==="number" ? (lo1 + dx*(nx-1)) : undefined);
+        return { ...h, nx, ny, dx, dy, la1, lo1, la2, lo2 };
+      }
+
+      const u = { header: normHeader(records[0].header || {}), data: records[0].data };
+      const v = { header: normHeader(records[1].header || {}), data: records[1].data };
+
+      const h = u.header;
+      const nx = h.nx, ny = h.ny, dx = h.dx, dy = h.dy, la1 = h.la1, lo1 = h.lo1;
+      if (![nx,ny,dx,dy,la1,lo1].every(x => typeof x === "number")) return records;
+      if (!Array.isArray(u.data) || !Array.isArray(v.data)) return records;
+      if (u.data.length !== nx*ny || v.data.length !== nx*ny) return records;
+
+      // Ensure north-to-south scan (dy negative). If not, don't crop here.
+      if (!(dy < 0)) return records;
+
+      const latMin = box.latMin, latMax = box.latMax, lonMin = box.lonMin, lonMax = box.lonMax;
+      // Compute index ranges (inclusive)
+      let y0 = Math.round((latMax - la1) / dy);
+      let y1 = Math.round((latMin - la1) / dy);
+      if (y0 > y1){ const t=y0; y0=y1; y1=t; }
+      y0 = Math.max(0, Math.min(ny-1, y0));
+      y1 = Math.max(0, Math.min(ny-1, y1));
+
+      let x0 = Math.round((lonMin - lo1) / dx);
+      let x1 = Math.round((lonMax - lo1) / dx);
+      if (x0 > x1){ const t=x0; x0=x1; x1=t; }
+      x0 = Math.max(0, Math.min(nx-1, x0));
+      x1 = Math.max(0, Math.min(nx-1, x1));
+
+      const nx2 = (x1 - x0 + 1);
+      const ny2 = (y1 - y0 + 1);
+      const n2 = nx2 * ny2;
+
+      const u2 = new Array(n2);
+      const v2 = new Array(n2);
+
+      let k = 0;
+      for (let y=y0; y<=y1; y++){
+        const row = y*nx;
+        for (let x=x0; x<=x1; x++){
+          const i = row + x;
+          u2[k] = u.data[i];
+          v2[k] = v.data[i];
+          k++;
+        }
+      }
+
+      const la1b = la1 + dy*y0;
+      const lo1b = lo1 + dx*x0;
+
+      const base = {
+        ...h,
+        la1: la1b,
+        lo1: lo1b,
+        nx: nx2,
+        ny: ny2,
+        la2: la1b + dy*(ny2-1),
+        lo2: lo1b + dx*(nx2-1),
+        dx, dy
+      };
+
+      return [
+        { header: { ...base, ...(records[0].header||{}) }, data: u2 },
+        { header: { ...base, ...(records[1].header||{}) }, data: v2 }
+      ];
+    }
+
+    // Crop window: broad Northern Hemisphere + North America / Atlantic (tweakable)
+    const jetCropBox = { latMin: 15, latMax: 85, lonMin: -170, lonMax: -30 };
+
+    // If data looks like [u,v], crop it. If it's other formats, leave it alone.
+    let jetData = velData;
+    try{
+      if (Array.isArray(velData) && velData.length >= 2 && velData[0]?.header && velData[1]?.header){
+        jetData = cropWindRecords(velData, jetCropBox);
+        console.log("Jet crop applied:", jetCropBox, "->", {nx: jetData[0].header.nx, ny: jetData[0].header.ny, la1: jetData[0].header.la1, lo1: jetData[0].header.lo1});
+      }
+    }catch(err){
+      console.warn("Jet crop failed (continuing without crop):", err);
+      jetData = velData;
+    }
+
 
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
@@ -1861,7 +1960,7 @@ async function refreshJetIfOn(){
     }
 
     jetLayer = L.velocityLayer({
-      data: velData,
+      data: jetData,
       displayValues: true,
       displayOptions: {
         velocityType: "250mb Wind",
