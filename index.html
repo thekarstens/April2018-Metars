@@ -13,8 +13,8 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.css"/>
 <script src="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.js"></script>
 
-<style>html, body { height:100%; margin:0; }
-  #map { height:100%; background:#fff; }
+<style>html, body { height:100%; margin:0; overflow:hidden; }
+  
 
   .dot{
     border-radius:50%;
@@ -75,9 +75,8 @@
   }
 
 /* Leaflet layer control nudge down below banner */
-  :root{ --banner-offset: 150px; }
-.leaflet-top.leaflet-right{ top: var(--banner-offset); }
-.leaflet-top.leaflet-left{ top: var(--banner-offset); }
+  .leaflet-top.leaflet-right{ top: var(--banner-offset, 90px); }
+.leaflet-top.leaflet-left{ top: var(--banner-offset, 90px); }
 
 /* Simple town label style */
   .town-label{
@@ -531,7 +530,6 @@
 
 /* --- Mobile banner tightening --- */
 @media (max-width: 600px){
-  :root{ --banner-offset: 110px; }
   .tvbanner{ padding:6px 10px; }
   .banner-inner{ flex-wrap:wrap; gap:8px; }
   .banner-title{ font-size:22px; }
@@ -559,6 +557,55 @@
 /* extra safety: if Leaflet applies .leaflet-top separately */
 .leaflet-top{ top: var(--banner-offset) !important; }
 
+/* ===== Banner/map layout hard-fix (prevents velocity canvas drifting) ===== */
+:root{ --banner-offset: 140px; } /* JS will auto-update this */
+
+#banner{
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 10000 !important;
+}
+
+#map{
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+
+/* Ensure leaflet-velocity canvases are clipped to the map container */
+.leaflet-velocity-layer,
+.leaflet-velocity-container,
+.leaflet-velocity-overlay,
+canvas.leaflet-velocity-overlay{
+  position:absolute !important;
+  left:0 !important;
+  top:0 !important;
+  width:100% !important;
+  height:100% !important;
+  pointer-events:none !important;
+}
+/* Keep leaflet controls below banner */
+.leaflet-control-container .leaflet-top{
+  top: var(--banner-offset) !important;
+}
+
+
+/* === FIX: Do NOT offset Leaflet panes (this breaks velocity canvas alignment) === */
+.leaflet-pane, .leaflet-map-pane, .leaflet-tile-pane, .leaflet-overlay-pane, .leaflet-shadow-pane, .leaflet-marker-pane, .leaflet-tooltip-pane, .leaflet-popup-pane{
+  top: 0 !important;
+  left: 0 !important;
+}
+/* Keep controls below the banner, but don't move the map panes */
+.leaflet-control-container{ pointer-events:none; }
+.leaflet-control-container *{ pointer-events:auto; }
 </style>
 </head>
 
@@ -614,6 +661,137 @@
 ------------------------------------------------------------ */
 const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
 
+// ---------------------------------------------------------------------
+// FIX: keep leaflet-velocity canvases INSIDE the Leaflet map panes.
+// Some builds of leaflet-velocity will momentarily insert its canvas/container
+// under <body>, which makes the particles draw at the top of the page
+// instead of over the map (especially with an overlay banner).
+// We watch for those nodes and immediately re-parent them into overlayPane.
+// ---------------------------------------------------------------------
+function _relocateVelocityDom(){
+  try{
+    if (!map || !map.getPanes) return;
+    const overlayPane = map.getPanes().overlayPane;
+    if (!overlayPane) return;
+
+    const selectors = [
+      ".leaflet-velocity-layer",
+      ".leaflet-velocity-container",
+      ".leaflet-velocity-overlay",
+      "canvas.leaflet-velocity-overlay",
+      "canvas.leaflet-velocity-layer"
+    ];
+
+    document.querySelectorAll(selectors.join(",")).forEach((node) => {
+      if (!node) return;
+      // If node isn't already in the map container, move it.
+      if (!map.getContainer().contains(node)){
+        overlayPane.appendChild(node);
+      } else if (node.parentElement !== overlayPane && node.tagName === "CANVAS"){
+        overlayPane.appendChild(node);
+      }
+      node.style.position = "absolute";
+      node.style.left = "0";
+      node.style.top = "0";
+      node.style.pointerEvents = "none";
+      node.style.zIndex = "350";
+    });
+  }catch(e){
+    console.warn("velocity DOM relocate failed:", e);
+  }
+}
+
+// Run once after initial layout, and again after Leaflet settles.
+setTimeout(_relocateVelocityDom, 0);
+setTimeout(_relocateVelocityDom, 250);
+
+// Observe DOM insertions so we catch canvases created AFTER toggle-on.
+(function(){
+  try{
+    const obs = new MutationObserver(() => _relocateVelocityDom());
+    obs.observe(document.body, { childList:true, subtree:true });
+    map.on("zoomstart movestart", _relocateVelocityDom);
+    map.on("zoomend moveend resize", _relocateVelocityDom);
+  }catch(e){
+    console.warn("MutationObserver unavailable:", e);
+  }
+})();
+window.map = map;
+// --- leaflet-velocity DOM/pane alignment helpers ---
+// If the velocity layer's canvas/container ends up attached to <body>, it will draw at the
+// top of the page instead of over the Leaflet map. We force the *container* into overlayPane.
+
+// --- leaflet-velocity DOM/pane alignment helpers ---
+// leaflet-velocity sometimes inserts its canvas/container into <body>.
+// If that happens (and because our map is pushed down by the banner),
+// the particles render "above" the map. We force any velocity DOM into the map's overlayPane.
+function forceVelocityIntoMap(layer){
+  try{
+    if (!map) return;
+    const overlayPane = map.getPanes && map.getPanes().overlayPane ? map.getPanes().overlayPane : null;
+    if (!overlayPane) return;
+
+    const nodes = new Set();
+
+    // Try layer internals first
+    if (layer){
+      if (layer._container) nodes.add(layer._container);
+      if (layer._el) nodes.add(layer._el);
+      if (layer._canvas) nodes.add(layer._canvas);
+      if (layer._velocityCanvas) nodes.add(layer._velocityCanvas);
+    }
+
+    // Also grab any velocity DOM the plugin created
+    document.querySelectorAll(
+      ".leaflet-velocity-layer, .leaflet-velocity-container, .leaflet-velocity-overlay, canvas.leaflet-velocity-overlay"
+    ).forEach(n => nodes.add(n));
+
+    nodes.forEach(node => {
+      if (!node || !node.parentElement) return;
+      // Move the node (or its parent wrapper) into the overlayPane so it clips/moves with the map.
+      const moveNode = node.classList && node.classList.contains("leaflet-velocity-overlay") ? node : node;
+      if (moveNode.parentElement !== overlayPane){
+        overlayPane.appendChild(moveNode);
+      }
+      moveNode.style.position = "absolute";
+      moveNode.style.left = "0";
+      moveNode.style.top = "0";
+      moveNode.style.pointerEvents = "none";
+      moveNode.style.zIndex = "300";
+    });
+  }catch(e){
+    console.warn("forceVelocityIntoMap failed:", e);
+  }
+}
+
+function attachVelocityContainerToOverlay(layer){ forceVelocityIntoMap(layer); }
+
+function resyncVelocityLayer(layer){
+  try{
+    if (!layer || !map) return;
+    forceVelocityIntoMap(layer);
+    const s = map.getSize();
+    const canvas =
+      layer._canvas ||
+      layer._velocityCanvas ||
+      (layer._container && layer._container.querySelector ? layer._container.querySelector("canvas") : null);
+
+    if (canvas){
+      // Backing store must match the actual map pixel size
+      if (canvas.width !== s.x) canvas.width = s.x;
+      if (canvas.height !== s.y) canvas.height = s.y;
+      canvas.style.width = s.x + "px";
+      canvas.style.height = s.y + "px";
+      canvas.style.display = "block";
+      canvas.style.position = "absolute";
+      canvas.style.left = "0";
+      canvas.style.top = "0";
+      canvas.style.pointerEvents = "none";
+    }
+  }catch(e){
+    console.warn("resyncVelocityLayer failed:", e);
+  }
+}
 /* ------------------------------------------------------------
    Story START button (temporary: opens your Google Sheet in a new tab)
 ------------------------------------------------------------ */
@@ -1761,33 +1939,7 @@ async function refreshParticlesIfOn(){
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const raw = await r.json();
-// If Colab already wrote 2-record leaflet-velocity JSON (u + v), use it directly.
-if (Array.isArray(raw) && raw.length === 2 && raw[0]?.header?.shortName && raw[1]?.header?.shortName){
-  const a0 = raw[0].header.shortName;
-  const a1 = raw[1].header.shortName;
-  if ((a0 === "u" && a1 === "v") || (a0 === "v" && a1 === "u")){
-    const records = (a0 === "u") ? raw : [raw[1], raw[0]];
-    if (jetLayer){ try{ map.removeLayer(jetLayer); }catch(_){ } jetLayer = null; }
-    jetLayer = L.velocityLayer({
-      data: records,
-      displayValues: true,
-      displayOptions: {
-        velocityType: "250mb Wind",
-        displayPosition: "bottomleft",
-        displayEmptyString: "No wind data"
-      },
-      maxVelocity: 160,
-      velocityScale: 0.015,
-      particleAge: 90,
-      particleMultiplier: 1/900,
-      lineWidth: 1.6,
-      opacity: 0.90
-    });
-    jetLayer.addTo(map);
-    setStatus(`Jet stream loaded (u/v): ${url.replace("./","")}`);
-    return;
-  }
-}    const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
+    const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
 
     if (particlesLayer){
       try { map.removeLayer(particlesLayer); } catch(_) {}
@@ -1813,6 +1965,12 @@ if (Array.isArray(raw) && raw.length === 2 && raw[0]?.header?.shortName && raw[1
     });
 
     particlesLayer.addTo(map);
+  setTimeout(() => resyncVelocityLayer(particlesLayer), 50);
+    attachVelocityContainerToOverlay(particlesLayer);
+    setTimeout(updateBannerOffset, 60);
+    // ensure velocity canvas matches final map size
+    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityContainerToOverlay(particlesLayer);
+  resyncVelocityLayer(particlesLayer); }, 60);
     setStatus(`Particles loaded: ${url.replace("./","")}`);
 
   } catch(e){
@@ -1821,6 +1979,7 @@ if (Array.isArray(raw) && raw.length === 2 && raw[0]?.header?.shortName && raw[1
   }
 }
 
+let _jetFetchInFlight = null;
 async function refreshJetIfOn(){
   if (!map.hasLayer(jetToggle)) return;
 
@@ -1829,138 +1988,170 @@ async function refreshJetIfOn(){
     return;
   }
 
-  const JET_FILES = [
-    "era5_wind_250hPa_20180411_12z_latlon_fixed.json",
-    "era5_wind_250hPa_20180411_12z_mercator.json",
-    "era5_wind_250hPa_20180410_12z_latlon_fixed.json",
-    "era5_wind_250hPa_20180410_12z_mercator.json"
-  ];
-
-  // Prefer the clean filename, but fall back if needed.
-  let url = "./jetstream/" + encodeURI(JET_FILES[0]);
-
-  // Some hosts block HEAD; we try a fast existence check and fall back.
-  for (const f of JET_FILES){
-    const testUrl = "./jetstream/" + encodeURI(f);
-    try{
-      const head = await fetch(testUrl, { method:"HEAD", cache:"no-store" });
-      if (head.ok){ url = testUrl; break; }
-    }catch(_){ /* ignore */ }
-  }
+  // Prefer the clean filename in ./jetstream/
+  const JET_URL = "./jetstream/era5_wind_250hPa_20180410_12z_mercator.json";
 
   try{
-    const r = await fetch(url, { cache:"no-store" });
+    const r = await fetch(JET_URL, { cache:"no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
 
-    const raw = await r.json();
-    const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
-    // --- TEMP CROPPING FIX ---
-    // If the global grid is being positioned incorrectly (common when headers/projection metadata
-    // don't match what leaflet-velocity expects), cropping to a northern-hemisphere window can
-    // "anchor" the layer so it at least plots on-map. We'll widen once placement is correct.
-    function cropWindRecords(records, box){
-      // records: [uRec, vRec] with regular lat/lon grid
-      if (!Array.isArray(records) || records.length < 2) return records;
+    const raw = await r.json(); // expected: [{header:{...}, data:[u0,v0,u1,v1,...]}]
+    const rec = Array.isArray(raw) ? raw[0] : raw;
 
-      function normHeader(h){
-        const nx = h.nx ?? h.Nx;
-        const ny = h.ny ?? h.Ny;
-        const dx = h.dx ?? h.Dx;
-        const dy = h.dy ?? h.Dy;
-        const la1 = h.la1 ?? h.La1;
-        const lo1 = h.lo1 ?? h.Lo1;
-        const la2 = (h.la2 ?? h.La2) ?? (typeof la1==="number" && typeof dy==="number" && typeof ny==="number" ? (la1 + dy*(ny-1)) : undefined);
-        const lo2 = (h.lo2 ?? h.Lo2) ?? (typeof lo1==="number" && typeof dx==="number" && typeof nx==="number" ? (lo1 + dx*(nx-1)) : undefined);
-        return { ...h, nx, ny, dx, dy, la1, lo1, la2, lo2 };
-      }
+    if (!rec || !rec.header || !rec.data) throw new Error("Invalid jet JSON: missing header/data");
+    const h = rec.header;
 
-      const u = { header: normHeader(records[0].header || {}), data: records[0].data };
-      const v = { header: normHeader(records[1].header || {}), data: records[1].data };
+    const nx = Number(h.nx || h.Nx);
+    const ny = Number(h.ny || h.Ny);
+    if (!nx || !ny) throw new Error("Missing nx/ny in header");
 
-      const h = u.header;
-      const nx = h.nx, ny = h.ny, dx = h.dx, dy = h.dy, la1 = h.la1, lo1 = h.lo1;
-      if (![nx,ny,dx,dy,la1,lo1].every(x => typeof x === "number")) return records;
-      if (!Array.isArray(u.data) || !Array.isArray(v.data)) return records;
-      if (u.data.length !== nx*ny || v.data.length !== nx*ny) return records;
+    const inter = rec.data;
+    const n = nx * ny;
+    const expectedLen = n * 2;
+    if (!Array.isArray(inter) || inter.length !== expectedLen){
+      throw new Error(`Data length mismatch: expected ${expectedLen}, got ${inter?.length ?? "?"}`);
+    }
 
-      // Ensure north-to-south scan (dy negative). If not, don't crop here.
-      if (!(dy < 0)) return records;
+    // 1) split interleaved u/v
+    const u = new Float32Array(n);
+    const v = new Float32Array(n);
+    for (let i=0, j=0; i<n; i++, j+=2){
+      u[i] = inter[j];
+      v[i] = inter[j+1];
+    }
 
-      const latMin = box.latMin, latMax = box.latMax, lonMin = box.lonMin, lonMax = box.lonMax;
-      // Compute index ranges (inclusive)
-      let y0 = Math.round((latMax - la1) / dy);
-      let y1 = Math.round((latMin - la1) / dy);
-      if (y0 > y1){ const t=y0; y0=y1; y1=t; }
-      y0 = Math.max(0, Math.min(ny-1, y0));
-      y1 = Math.max(0, Math.min(ny-1, y1));
+    // 2) leaflet-velocity expects GRIB-style orientation:
+    //    la1 = NW corner (north), dy negative (north->south)
+    // Your file is south->north (la1=-85, dy=+0.5), so we flip rows.
+    let la1 = Number(h.la1);
+    let lo1 = Number(h.lo1);
+    let dx  = Number(h.dx);
+    let dy  = Number(h.dy);
 
-      let x0 = Math.round((lonMin - lo1) / dx);
-      let x1 = Math.round((lonMax - lo1) / dx);
-      if (x0 > x1){ const t=x0; x0=x1; x1=t; }
-      x0 = Math.max(0, Math.min(nx-1, x0));
-      x1 = Math.max(0, Math.min(nx-1, x1));
+    if (!isFinite(la1) || !isFinite(lo1) || !isFinite(dx) || !isFinite(dy)){
+      throw new Error("Header has non-numeric la1/lo1/dx/dy");
+    }
 
-      const nx2 = (x1 - x0 + 1);
-      const ny2 = (y1 - y0 + 1);
-      const n2 = nx2 * ny2;
-
-      const u2 = new Array(n2);
-      const v2 = new Array(n2);
-
-      let k = 0;
-      for (let y=y0; y<=y1; y++){
-        const row = y*nx;
-        for (let x=x0; x<=x1; x++){
-          const i = row + x;
-          u2[k] = u.data[i];
-          v2[k] = v.data[i];
-          k++;
+    // If dy is positive, the first row is southernmost; flip to north-first.
+    if (dy > 0){
+      const uFlip = new Float32Array(n);
+      const vFlip = new Float32Array(n);
+      for (let y=0; y<ny; y++){
+        const srcRow = (ny - 1 - y) * nx;
+        const dstRow = y * nx;
+        for (let x=0; x<nx; x++){
+          const s = srcRow + x;
+          const d = dstRow + x;
+          uFlip[d] = u[s];
+          vFlip[d] = v[s];
         }
       }
+      u.set(uFlip);
+      v.set(vFlip);
 
-      const la1b = la1 + dy*y0;
-      const lo1b = lo1 + dx*x0;
+      // north edge latitude becomes la1 + dy*(ny-1); dy becomes negative
+      la1 = la1 + dy * (ny - 1);
+      dy = -dy;
+    }
 
-      const base = {
-        ...h,
-        la1: la1b,
-        lo1: lo1b,
-        nx: nx2,
-        ny: ny2,
-        la2: la1b + dy*(ny2-1),
-        lo2: lo1b + dx*(nx2-1),
-        dx, dy
+    // Build GRIB-like u/v records that leaflet-velocity understands.
+    const la2 = la1 + dy * (ny - 1);
+    const lo2 = lo1 + dx * (nx - 1);
+
+    const baseHeader = {
+      lo1, la1, lo2, la2,
+      dx, dy, nx, ny,
+      refTime: h.refTime || h.ref_time || h.time || null
+    };
+
+    const uRecord = {
+      header: {
+        ...baseHeader,
+        parameterCategory: 2,
+        parameterNumber: 2,
+        parameterNumberName: "u_component_of_wind",
+        parameterUnit: "m/s"
+      },
+      data: Array.from(u) // leaflet-velocity expects plain arrays
+    };
+
+    const vRecord = {
+      header: {
+        ...baseHeader,
+        parameterCategory: 2,
+        parameterNumber: 3,
+        parameterNumberName: "v_component_of_wind",
+        parameterUnit: "m/s"
+      },
+      data: Array.from(v)
+    };
+
+
+    // --- OPTIONAL: crop the global ERA5 grid to keep the lesson focused (and avoid edge/wrap issues) ---
+    // If you want FULL-GLOBE particles, set CROP_JET = false.
+    const CROP_JET = true;
+    if (CROP_JET){
+      // North America-friendly box (tweak anytime)
+      const CROP_W = -170, CROP_E = -40, CROP_S = 15, CROP_N = 75;
+
+      // We assume a regular lat/lon grid after the flip (dy should be negative, la1 should be north edge)
+      const H = uRecord.header;
+      const dx2 = H.dx, dy2 = H.dy, nx2 = H.nx, ny2 = H.ny;
+      const lo1b = H.lo1, la1b = H.la1;
+
+      // Normalize longitudes into the same -180..180 space as lo1
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+      const xFromLon = (lon) => Math.round((lon - lo1b) / dx2);
+      const yFromLat = (lat) => Math.round((la1b - lat) / Math.abs(dy2)); // dy2 is negative
+
+      let x0 = clamp(xFromLon(CROP_W), 0, nx2-1);
+      let x1 = clamp(xFromLon(CROP_E), 0, nx2-1);
+      let y0 = clamp(yFromLat(CROP_N), 0, ny2-1);
+      let y1 = clamp(yFromLat(CROP_S), 0, ny2-1);
+
+      if (x1 < x0){ const t=x0; x0=x1; x1=t; }
+      if (y1 < y0){ const t=y0; y0=y1; y1=t; }
+
+      const newNx = (x1 - x0 + 1);
+      const newNy = (y1 - y0 + 1);
+
+      const cropField = (arr) => {
+        const out = new Array(newNx * newNy);
+        let k = 0;
+        for (let y = y0; y <= y1; y++){
+          const row = y * nx2;
+          for (let x = x0; x <= x1; x++){
+            out[k++] = arr[row + x];
+          }
+        }
+        return out;
       };
 
-      return [
-        { header: { ...base, ...(records[0].header||{}) }, data: u2 },
-        { header: { ...base, ...(records[1].header||{}) }, data: v2 }
-      ];
+      uRecord.data = cropField(uRecord.data);
+      vRecord.data = cropField(vRecord.data);
+
+      // Update headers to match the cropped grid
+      const newLo1 = lo1b + dx2 * x0;
+      const newLa1 = la1b + dy2 * y0; // dy2 negative
+      const newLo2 = newLo1 + dx2 * (newNx - 1);
+      const newLa2 = newLa1 + dy2 * (newNy - 1);
+
+      [uRecord, vRecord].forEach(rec => {
+        rec.header = {
+          ...rec.header,
+          lo1: newLo1, la1: newLa1, lo2: newLo2, la2: newLa2,
+          nx: newNx, ny: newNy,
+          dx: dx2, dy: dy2
+        };
+      });
     }
-
-    // Crop window: broad Northern Hemisphere + North America / Atlantic (tweakable)
-    const jetCropBox = { latMin: 15, latMax: 85, lonMin: -170, lonMax: -30 };
-
-    // If data looks like [u,v], crop it. If it's other formats, leave it alone.
-    let jetData = velData;
-    try{
-      if (Array.isArray(velData) && velData.length >= 2 && velData[0]?.header && velData[1]?.header){
-        jetData = cropWindRecords(velData, jetCropBox);
-        console.log("Jet crop applied:", jetCropBox, "->", {nx: jetData[0].header.nx, ny: jetData[0].header.ny, la1: jetData[0].header.la1, lo1: jetData[0].header.lo1});
-      }
-    }catch(err){
-      console.warn("Jet crop failed (continuing without crop):", err);
-      jetData = velData;
-    }
-
-
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
       jetLayer = null;
     }
 
     jetLayer = L.velocityLayer({
-      data: jetData,
+      data: [uRecord, vRecord],
       displayValues: true,
       displayOptions: {
         velocityType: "250mb Wind",
@@ -1968,7 +2159,7 @@ async function refreshJetIfOn(){
         displayEmptyString: "No wind data"
       },
       maxVelocity: 160,
-      velocityScale: 0.02,
+      velocityScale: 0.015,
       particleAge: 90,
       particleMultiplier: 1/900,
       lineWidth: 1.6,
@@ -1976,10 +2167,13 @@ async function refreshJetIfOn(){
     });
 
     jetLayer.addTo(map);
-    setStatus(`Jet stream loaded: ${url.replace("./","")}`);
+
+    setStatus("Jet stream loaded.");
+    console.log("Jet OK", {nx, ny, la1, lo1, dx, dy});
+
   }catch(e){
-    console.warn("Jet stream failed:", url, e.message);
-    setStatus(`Jet stream not found / not readable: ${url.replace("./","")}`);
+    console.error("Jet stream error:", e);
+    setStatus(`Jet stream failed: ${e.message}`);
   }
 }
 
@@ -2187,17 +2381,37 @@ refreshAll().catch(err => {
 });
 </script>
 
+
+
+
 <script>
 (function(){
   function updateBannerOffset(){
     const b = document.getElementById('banner');
     if(!b) return;
     document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 8) + 'px');
+    // If Leaflet map exists, force a resize so overlays (incl. velocity) align.
+    if (window.map && typeof window.map.invalidateSize === 'function'){
+      window.map.invalidateSize(true);
+    }
   }
-  window.updateBannerOffset = updateBannerOffset;
-  updateBannerOffset();
+  window.addEventListener('load', updateBannerOffset);
   window.addEventListener('resize', updateBannerOffset);
 })();
+</script>
+
+
+<script>
+  // Keep Leaflet + leaflet-velocity aligned even with the overlay banner.
+  window.addEventListener('load', () => {
+    const b = document.querySelector('.tvbanner');
+    if (b) {
+      document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 10) + 'px');
+    }
+    if (window.map && typeof window.map.invalidateSize === 'function') {
+      setTimeout(() => window.map.invalidateSize(true), 50);
+    }
+  });
 </script>
 
 </body>
