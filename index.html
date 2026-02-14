@@ -1747,68 +1747,6 @@ function normalizeVelocityJson(raw, opts={}){
 }
 
 
-// Pad latitude to full 90..-90 grid (361 rows at 0.5°) if a dataset is clipped to ±85°.
-// Some builds of leaflet-velocity/WindJS behave better when the grid spans the full pole-to-pole range.
-// We add 10 empty rows at the top and bottom (5° each) and shift the original data into the middle.
-function padVelocityToPolesIfNeeded(records){
-  try{
-    if (!Array.isArray(records)) return records;
-    const out = records.map(rec => {
-      if (!rec || !rec.header || !Array.isArray(rec.data)) return rec;
-
-      const h = rec.header;
-      const nx = Number(h.nx ?? h.Nx);
-      const ny = Number(h.ny ?? h.Ny);
-      const la1 = Number(h.la1);
-      const la2 = Number(h.la2);
-      const dx = Number(h.dx);
-      const dy = Number(h.dy);
-
-      // Expect 0.5° grid, global longitudes, clipped to ±85°.
-      if (!(nx === 720 && ny === 341 && Math.abs(dx) === 0.5 && Math.abs(dy) === 0.5)) return rec;
-      if (!(Math.abs(la1) === 85 && Math.abs(la2) === 85)) return rec;
-
-      const expected = nx * ny;
-      if (rec.data.length !== expected) return rec;
-
-      const padRows = 10;             // 5° / 0.5° = 10 rows
-      const newNy = ny + padRows*2;   // 361
-      const newData = new Array(nx * newNy).fill(0);
-
-      // Copy rows into the middle
-      for (let y = 0; y < ny; y++){
-        const src = y * nx;
-        const dst = (y + padRows) * nx;
-        for (let x = 0; x < nx; x++){
-          newData[dst + x] = rec.data[src + x];
-        }
-      }
-
-      const northFirst = la1 > la2;
-      const newHeader = { ...h };
-
-      // Update header to full poles; preserve scan direction via la1/la2 and dy sign.
-      if (northFirst){
-        newHeader.la1 = 90.0;
-        newHeader.la2 = -90.0;
-        newHeader.dy  = -Math.abs(dy);
-      }else{
-        newHeader.la1 = -90.0;
-        newHeader.la2 = 90.0;
-        newHeader.dy  = Math.abs(dy);
-      }
-      newHeader.ny = newNy;
-      newHeader.Ny = newNy;
-
-      return { ...rec, header: newHeader, data: newData };
-    });
-    return out;
-  }catch(_){
-    return records;
-  }
-}
-
-
 async function refreshParticlesIfOn(){
   if (!map.hasLayer(particlesToggle)) return;
 
@@ -1898,8 +1836,10 @@ async function refreshJetIfOn(){
     "era5_wind_250hPa_20180410_12z_mercator.json"
   ];
 
-  // Find first existing file (HEAD) so we don't 404 spam
+  // Prefer the clean filename, but fall back if needed.
   let url = "./jetstream/" + encodeURI(JET_FILES[0]);
+
+  // Some hosts block HEAD; we try a fast existence check and fall back.
   for (const f of JET_FILES){
     const testUrl = "./jetstream/" + encodeURI(f);
     try{
@@ -1908,168 +1848,12 @@ async function refreshJetIfOn(){
     }catch(_){ /* ignore */ }
   }
 
-  // --- helpers ---
-  function flipRowsInPlace(arr, nx, ny){
-    const out = new Array(arr.length);
-    for (let y=0; y<ny; y++){
-      const src = (ny-1-y)*nx;
-      const dst = y*nx;
-      for (let x=0; x<nx; x++){
-        out[dst+x] = arr[src+x];
-      }
-    }
-    arr.splice(0, arr.length, ...out);
-  }
-
-  function padToPoles(rec, targetLa1=90.0, targetLa2=-90.0){
-    const h = rec.header || {};
-    const nx = h.nx ?? h.Nx;
-    const ny = h.ny ?? h.Ny;
-    let la1 = h.la1, la2 = h.la2, dy = h.dy;
-    if (!nx || !ny || typeof la1!=="number" || typeof la2!=="number" || typeof dy!=="number") return rec;
-
-    // only pad the common 85/-85 @ 0.5° grid
-    const looksLike = (Math.abs(la1-85) < 1e-6 && Math.abs(la2+85) < 1e-6 && ny === 341 && Math.abs(Math.abs(dy)-0.5) < 1e-6);
-    if (!looksLike) return rec;
-
-    const padRows = 10; // 85 -> 90 is 10 steps of 0.5
-    const newNy = ny + padRows*2;
-    const nPad = padRows * nx;
-
-    const data = rec.data;
-    if (!Array.isArray(data) || data.length !== nx*ny) return rec;
-
-    // Determine where "north" is in the array by dy sign:
-    // grib2json-style is north->south when dy is negative.
-    // If dy is positive, the array is south->north.
-    // We'll convert to north->south first, then pad, then set dy negative.
-    if (dy > 0){
-      flipRowsInPlace(data, nx, ny);
-      dy = -dy;
-      la1 = la2; // after flip, first row is what used to be la2
-      la2 = la1 + dy*(newNy-1); // temporary; will reset below
-    }
-
-    const padded = new Array(nx*newNy);
-    // top pad
-    for (let i=0;i<nPad;i++) padded[i] = 0;
-    // middle
-    for (let i=0;i<data.length;i++) padded[nPad+i] = data[i];
-    // bottom pad
-    for (let i=0;i<nPad;i++) padded[nPad+data.length+i] = 0;
-
-    rec.data = padded;
-    rec.header = {
-      ...h,
-      la1: targetLa1,
-      la2: targetLa2,
-      ny: newNy,
-      dy: -Math.abs(dy)
-    };
-    // recompute lo2/la2 consistently if missing
-    if (typeof rec.header.lo2 !== "number" && typeof rec.header.lo1 === "number" && typeof rec.header.dx === "number"){
-      rec.header.lo2 = rec.header.lo1 + rec.header.dx * (nx - 1);
-    }
-    return rec;
-  }
-
-  function ensureNorthToSouth(rec){
-    const h = rec.header || {};
-    const nx = h.nx ?? h.Nx;
-    const ny = h.ny ?? h.Ny;
-    if (!nx || !ny) return rec;
-
-    // Ensure la1 is northmost and dy points south (negative)
-    if (typeof h.la1 === "number" && typeof h.la2 === "number"){
-      if (h.la1 < h.la2){
-        // header inverted: flip array
-        if (Array.isArray(rec.data) && rec.data.length === nx*ny){
-          flipRowsInPlace(rec.data, nx, ny);
-        }
-        const oldLa1 = h.la1;
-        h.la1 = h.la2;
-        h.la2 = oldLa1;
-      }
-    }
-    if (typeof h.dy === "number" && h.dy > 0){
-      if (Array.isArray(rec.data) && rec.data.length === nx*ny){
-        flipRowsInPlace(rec.data, nx, ny);
-      }
-      h.dy = -h.dy;
-      // adjust la1/la2 if present
-      if (typeof h.la1 === "number" && typeof h.la2 === "number"){
-        const tmp = h.la1; h.la1 = h.la2; h.la2 = tmp;
-      }
-    }
-    rec.header = h;
-    return rec;
-  }
-
-  function splitInterleaved(firstRecord){
-    const h = firstRecord.header || {};
-    const nx = h.nx ?? h.Nx;
-    const ny = h.ny ?? h.Ny;
-    const n = nx*ny;
-    const data = firstRecord.data;
-    if (!nx || !ny || !Array.isArray(data) || data.length !== n*2){
-      throw new Error("Interleaved format mismatch (need nx*ny*2).");
-    }
-
-    const uData = new Array(n);
-    const vData = new Array(n);
-    for (let i=0, j=0; i<n; i++, j+=2){
-      uData[i] = data[j];
-      vData[i] = data[j+1];
-    }
-
-    const baseHeader = {
-      la1: h.la1,
-      la2: (typeof h.la2 === "number") ? h.la2 : (h.la1 + h.dy*(ny-1)),
-      lo1: h.lo1,
-      lo2: (typeof h.lo2 === "number") ? h.lo2 : (h.lo1 + h.dx*(nx-1)),
-      dx: h.dx,
-      dy: h.dy,
-      nx: nx,
-      ny: ny,
-      refTime: h.refTime
-    };
-
-    const uRecord = { header: { ...baseHeader, parameterCategory:2, parameterNumber:2, parameterNumberName:"u_component_of_wind", parameterUnit:"m/s", shortName:"u" }, data: uData };
-    const vRecord = { header: { ...baseHeader, parameterCategory:2, parameterNumber:3, parameterNumberName:"v_component_of_wind", parameterUnit:"m/s", shortName:"v" }, data: vData };
-    return [uRecord, vRecord];
-  }
-
   try{
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
 
     const raw = await r.json();
-
-    // Normalize to array of records
-    let records = Array.isArray(raw) ? raw : (raw.data ? raw.data : [raw]);
-    if (!records.length) throw new Error("Empty JSON");
-
-    // If already grib2json-style with u & v, use as-is
-    const hasUV = records.length >= 2
-      && records[0]?.header?.shortName && records[1]?.header?.shortName
-      && (String(records[0].header.shortName).toLowerCase() === "u" || String(records[0].header.parameterNumberName||"").includes("u_component"))
-      && (String(records[1].header.shortName).toLowerCase() === "v" || String(records[1].header.parameterNumberName||"").includes("v_component"));
-
-    if (hasUV){
-      records = [records[0], records[1]];
-    } else {
-      // otherwise treat as interleaved u/v
-      records = splitInterleaved(records[0]);
-    }
-
-    // Fix orientation + (optional) scan-mode padding
-    const uRec = padToPoles(ensureNorthToSouth(records[0]));
-    const vRec = padToPoles(ensureNorthToSouth(records[1]));
-
-    const hu = uRec.header;
-    console.log("Jet stream headers:", {
-      la1: hu.la1, la2: hu.la2, dy: hu.dy, nx: hu.nx, ny: hu.ny, lo1: hu.lo1, lo2: hu.lo2
-    });
+    const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
 
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
@@ -2077,7 +1861,7 @@ async function refreshJetIfOn(){
     }
 
     jetLayer = L.velocityLayer({
-      data: [uRec, vRec],
+      data: velData,
       displayValues: true,
       displayOptions: {
         velocityType: "250mb Wind",
@@ -2085,7 +1869,7 @@ async function refreshJetIfOn(){
         displayEmptyString: "No wind data"
       },
       maxVelocity: 160,
-      velocityScale: 0.010,     // slightly calmer for jet
+      velocityScale: 0.02,
       particleAge: 90,
       particleMultiplier: 1/900,
       lineWidth: 1.6,
@@ -2095,8 +1879,8 @@ async function refreshJetIfOn(){
     jetLayer.addTo(map);
     setStatus(`Jet stream loaded: ${url.replace("./","")}`);
   }catch(e){
-    console.error("Jet stream error:", e);
-    setStatus(`Jet stream failed: ${e.message}`);
+    console.warn("Jet stream failed:", url, e.message);
+    setStatus(`Jet stream not found / not readable: ${url.replace("./","")}`);
   }
 }
 
