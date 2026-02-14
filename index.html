@@ -1883,7 +1883,7 @@ if (Array.isArray(raw) && raw.length === 2 && raw[0]?.header?.shortName && raw[1
   }
 }
 
-async async function refreshJetIfOn(){
+async function refreshJetIfOn(){
   if (!map.hasLayer(jetToggle)) return;
 
   if (typeof L.velocityLayer !== "function"){
