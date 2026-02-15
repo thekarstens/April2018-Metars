@@ -2043,170 +2043,108 @@ async function refreshJetIfOn(){
     return;
   }
 
-  // Prefer the clean filename in ./jetstream/
-  const JET_URL = "./jetstream/era5_wind_250hPa_20180410_12z_mercator.json";
+  // Prefer the new smaller Western US file, but try a couple common locations.
+  const JET_FILES = [
+    "jetstream_western_us_250mb_20180414_18Z.json"
+  ];
+
+  const CANDIDATE_PREFIXES = ["./", "./jetstream/"];
+
+  let url = null;
+
+  // Find first accessible file via HEAD
+  for (const prefix of CANDIDATE_PREFIXES){
+    for (const f of JET_FILES){
+      const testUrl = prefix + encodeURI(f);
+      try{
+        const head = await fetch(testUrl, { method:"HEAD", cache:"no-store" });
+        if (head.ok){ url = testUrl; break; }
+      }catch(_){ /* ignore */ }
+    }
+    if (url) break;
+  }
+
+  // Fallback to a direct fetch (GitHub Pages sometimes blocks HEAD for some setups)
+  if (!url){
+    url = "./" + encodeURI(JET_FILES[0]);
+  }
 
   try{
-    const r = await fetch(JET_URL, { cache:"no-store" });
+    // IMPORTANT: Some Colab exports contain literal `NaN` tokens (invalid JSON).
+    // Fetch as text, replace NaN with 0, then parse.
+    const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
 
-    const raw = await r.json(); // expected: [{header:{...}, data:[u0,v0,u1,v1,...]}]
-    const rec = Array.isArray(raw) ? raw[0] : raw;
+    const rawText = await r.text();
+    const safeText = rawText.replace(/\bNaN\b/g, "0");
+    const raw = JSON.parse(safeText);
 
-    if (!rec || !rec.header || !rec.data) throw new Error("Invalid jet JSON: missing header/data");
-    const h = rec.header;
-
-    const nx = Number(h.nx || h.Nx);
-    const ny = Number(h.ny || h.Ny);
-    if (!nx || !ny) throw new Error("Missing nx/ny in header");
-
-    const inter = rec.data;
-    const n = nx * ny;
-    const expectedLen = n * 2;
-    if (!Array.isArray(inter) || inter.length !== expectedLen){
-      throw new Error(`Data length mismatch: expected ${expectedLen}, got ${inter?.length ?? "?"}`);
+    // Expect grib2json-like array: [uRecord, vRecord]
+    const records = Array.isArray(raw) ? raw : (raw.data ? raw.data : [raw]);
+    if (!records || records.length < 2){
+      throw new Error("Expected an array with u and v wind records.");
     }
 
-    // 1) split interleaved u/v
-    const u = new Float32Array(n);
-    const v = new Float32Array(n);
-    for (let i=0, j=0; i<n; i++, j+=2){
-      u[i] = inter[j];
-      v[i] = inter[j+1];
-    }
+    // Normalize headers so leaflet-velocity interprets grid correctly.
+    // We enforce:
+    // - la1 = northern edge, la2 = southern edge
+    // - dy negative when scanning north->south
+    // - lo2/la2 present
+    for (const rec of records){
+      if (!rec || !rec.header || !rec.data) throw new Error("Bad record structure in jet file.");
+      const h = rec.header;
 
-    // 2) leaflet-velocity expects GRIB-style orientation:
-    //    la1 = NW corner (north), dy negative (north->south)
-    // Your file is south->north (la1=-85, dy=+0.5), so we flip rows.
-    let la1 = Number(h.la1);
-    let lo1 = Number(h.lo1);
-    let dx  = Number(h.dx);
-    let dy  = Number(h.dy);
+      // Coerce nx/ny/dx/dy keys
+      h.nx = h.nx ?? h.Nx;
+      h.ny = h.ny ?? h.Ny;
+      h.dx = h.dx ?? h.Dx;
+      h.dy = h.dy ?? h.Dy;
 
-    if (!isFinite(la1) || !isFinite(lo1) || !isFinite(dx) || !isFinite(dy)){
-      throw new Error("Header has non-numeric la1/lo1/dx/dy");
-    }
+      if (typeof h.nx !== "number" || typeof h.ny !== "number") throw new Error("Missing nx/ny in header.");
+      if (typeof h.dx !== "number" || typeof h.dy !== "number") throw new Error("Missing dx/dy in header.");
+      if (typeof h.la1 !== "number" || typeof h.lo1 !== "number") throw new Error("Missing la1/lo1 in header.");
 
-    // If dy is positive, the first row is southernmost; flip to north-first.
-    if (dy > 0){
-      const uFlip = new Float32Array(n);
-      const vFlip = new Float32Array(n);
-      for (let y=0; y<ny; y++){
-        const srcRow = (ny - 1 - y) * nx;
-        const dstRow = y * nx;
-        for (let x=0; x<nx; x++){
-          const s = srcRow + x;
-          const d = dstRow + x;
-          uFlip[d] = u[s];
-          vFlip[d] = v[s];
-        }
-      }
-      u.set(uFlip);
-      v.set(vFlip);
+      // Make dy negative (north -> south scan). Keep magnitude.
+      if (h.dy > 0) h.dy = -h.dy;
 
-      // north edge latitude becomes la1 + dy*(ny-1); dy becomes negative
-      la1 = la1 + dy * (ny - 1);
-      dy = -dy;
-    }
+      // Compute la2/lo2 if missing
+      if (typeof h.la2 !== "number") h.la2 = h.la1 + h.dy * (h.ny - 1);
+      if (typeof h.lo2 !== "number") h.lo2 = h.lo1 + h.dx * (h.nx - 1);
 
-    // Build GRIB-like u/v records that leaflet-velocity understands.
-    const la2 = la1 + dy * (ny - 1);
-    const lo2 = lo1 + dx * (nx - 1);
+      // Guardrails: clamp to WebMercator lat limits
+      const MAX_LAT = 85.05112878;
+      h.la1 = Math.max(Math.min(h.la1, MAX_LAT), -MAX_LAT);
+      h.la2 = Math.max(Math.min(h.la2, MAX_LAT), -MAX_LAT);
 
-    const baseHeader = {
-      lo1, la1, lo2, la2,
-      dx, dy, nx, ny,
-      refTime: h.refTime || h.ref_time || h.time || null
-    };
+      // If la1 < la2 after clamping, swap and flip dy + data rows
+      if (h.la1 < h.la2){
+        // swap la1/la2
+        const tmp = h.la1; h.la1 = h.la2; h.la2 = tmp;
+        h.dy = -h.dy;
 
-    const uRecord = {
-      header: {
-        ...baseHeader,
-        parameterCategory: 2,
-        parameterNumber: 2,
-        parameterNumberName: "u_component_of_wind",
-        parameterUnit: "m/s"
-      },
-      data: Array.from(u) // leaflet-velocity expects plain arrays
-    };
-
-    const vRecord = {
-      header: {
-        ...baseHeader,
-        parameterCategory: 2,
-        parameterNumber: 3,
-        parameterNumberName: "v_component_of_wind",
-        parameterUnit: "m/s"
-      },
-      data: Array.from(v)
-    };
-
-
-    // --- OPTIONAL: crop the global ERA5 grid to keep the lesson focused (and avoid edge/wrap issues) ---
-    // If you want FULL-GLOBE particles, set CROP_JET = false.
-    const CROP_JET = true;
-    if (CROP_JET){
-      // North America-friendly box (tweak anytime)
-      const CROP_W = -170, CROP_E = -40, CROP_S = 15, CROP_N = 75;
-
-      // We assume a regular lat/lon grid after the flip (dy should be negative, la1 should be north edge)
-      const H = uRecord.header;
-      const dx2 = H.dx, dy2 = H.dy, nx2 = H.nx, ny2 = H.ny;
-      const lo1b = H.lo1, la1b = H.la1;
-
-      // Normalize longitudes into the same -180..180 space as lo1
-      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-      const xFromLon = (lon) => Math.round((lon - lo1b) / dx2);
-      const yFromLat = (lat) => Math.round((la1b - lat) / Math.abs(dy2)); // dy2 is negative
-
-      let x0 = clamp(xFromLon(CROP_W), 0, nx2-1);
-      let x1 = clamp(xFromLon(CROP_E), 0, nx2-1);
-      let y0 = clamp(yFromLat(CROP_N), 0, ny2-1);
-      let y1 = clamp(yFromLat(CROP_S), 0, ny2-1);
-
-      if (x1 < x0){ const t=x0; x0=x1; x1=t; }
-      if (y1 < y0){ const t=y0; y0=y1; y1=t; }
-
-      const newNx = (x1 - x0 + 1);
-      const newNy = (y1 - y0 + 1);
-
-      const cropField = (arr) => {
-        const out = new Array(newNx * newNy);
-        let k = 0;
-        for (let y = y0; y <= y1; y++){
-          const row = y * nx2;
-          for (let x = x0; x <= x1; x++){
-            out[k++] = arr[row + x];
+        // flip data rows to match new scan direction
+        const nx = h.nx, ny = h.ny;
+        const n = nx * ny;
+        const flipped = new Array(n);
+        for (let y = 0; y < ny; y++){
+          const srcRow = (ny - 1 - y) * nx;
+          const dstRow = y * nx;
+          for (let x = 0; x < nx; x++){
+            flipped[dstRow + x] = rec.data[srcRow + x];
           }
         }
-        return out;
-      };
-
-      uRecord.data = cropField(uRecord.data);
-      vRecord.data = cropField(vRecord.data);
-
-      // Update headers to match the cropped grid
-      const newLo1 = lo1b + dx2 * x0;
-      const newLa1 = la1b + dy2 * y0; // dy2 negative
-      const newLo2 = newLo1 + dx2 * (newNx - 1);
-      const newLa2 = newLa1 + dy2 * (newNy - 1);
-
-      [uRecord, vRecord].forEach(rec => {
-        rec.header = {
-          ...rec.header,
-          lo1: newLo1, la1: newLa1, lo2: newLo2, la2: newLa2,
-          nx: newNx, ny: newNy,
-          dx: dx2, dy: dy2
-        };
-      });
+        rec.data = flipped;
+      }
     }
+
+    // Remove existing layer
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
       jetLayer = null;
     }
 
     jetLayer = L.velocityLayer({
-      data: [uRecord, vRecord],
+      data: records,
       displayValues: true,
       displayOptions: {
         velocityType: "250mb Wind",
@@ -2222,11 +2160,15 @@ async function refreshJetIfOn(){
     });
 
     jetLayer.addTo(map);
-    forceVelocityIntoMap();
 
+    // Re-run DOM relocation (your banner/overlay environment can cause the canvas to be attached wrong)
+    try{
+      if (typeof _relocateVelocityDom === "function") _relocateVelocityDom();
+      if (typeof _installVelocityDomObserver === "function") _installVelocityDomObserver();
+    }catch(_){}
 
-    setStatus("Jet stream loaded.");
-    console.log("Jet OK", {nx, ny, la1, lo1, dx, dy});
+    setStatus(`Jet stream loaded: ${url.replace("./","")}`);
+    console.log("Jet stream loaded + normalized:", records.map(r=>r.header));
 
   }catch(e){
     console.error("Jet stream error:", e);
