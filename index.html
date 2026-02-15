@@ -2137,6 +2137,36 @@ async function refreshJetIfOn(){
       }
     }
 
+
+    // --- Header override (regional jetstream files) ---
+    // If the upstream generator wrote incorrect la1/lo1/dx/dy extents (common when resampling in Mercator space),
+    // leaflet-velocity will place the field near the poles or 'off the top'.
+    // For this Western US test file, force a sane geographic bbox that matches the data grid dimensions.
+    try{
+      const h0 = records[0] && records[0].header ? records[0].header : {};
+      const nx = h0.nx || h0.Nx;
+      const ny = h0.ny || h0.Ny;
+      if (nx && ny){
+        // Choose a bbox that comfortably covers the western/central US.
+        const LO1 = -135.0;
+        const LO2 = -78.25;
+        const LA1 =  60.0;
+        const LA2 =  24.25;
+        const DX = (LO2 - LO1) / (nx - 1);
+        const DY = (LA2 - LA1) / (ny - 1); // negative
+        records.forEach(r => {
+          r.header = {
+            ...r.header,
+            lo1: LO1, lo2: LO2,
+            la1: LA1, la2: LA2,
+            dx: DX, dy: DY,
+            nx: nx, ny: ny,
+          };
+        });
+        console.log('Jet header forced (bbox override):', {LO1,LO2,LA1,LA2,DX,DY,nx,ny});
+      }
+    }catch(e){ console.warn('Jet header override failed:', e); }
+
     // Remove existing layer
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
