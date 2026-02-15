@@ -2044,25 +2044,30 @@ async function refreshJetIfOn(){
   }
 
   // --- Choose a jet file (first existing wins) ---
-  const JET_FILES = [
-    "jetstream_western_us_250mb_20180414_18Z.json",
-    "era5_wind_250hPa_20180414_18z_latlon_fixed.json",
-    "era5_wind_250hPa_20180411_12z_latlon_fixed.json",
-    "era5_wind_250hPa_20180410_12z_latlon_fixed.json"
-  ];
+// Prefer the single file you just exported from Colab (repo root), but keep fallbacks.
+// Put the most likely path FIRST.
+const JET_URLS = [
+  "./wind_data.json",
+  "./jetstream/wind_data.json",
 
-  let url = null;
-  for (const f of JET_FILES){
-    const testUrl = "./jetstream/" + encodeURI(f);
-    try{
-      const head = await fetch(testUrl, { method:"HEAD", cache:"no-store" });
-      if (head.ok){ url = testUrl; break; }
-    }catch(_){}
-  }
-  if (!url){
-    setStatus("Jet stream: no jetstream JSON found in ./jetstream/");
-    return;
-  }
+  // Older filenames you experimented with:
+  "./jetstream/jetstream_western_us_250mb_20180414_18Z.json",
+  "./jetstream/era5_wind_250hPa_20180414_18z_latlon_fixed.json",
+  "./jetstream/era5_wind_250hPa_20180411_12z_latlon_fixed.json",
+  "./jetstream/era5_wind_250hPa_20180410_12z_latlon_fixed.json"
+];
+
+let url = null;
+for (const testUrl of JET_URLS){
+  try{
+    const head = await fetch(testUrl, { method:"HEAD", cache:"no-store" });
+    if (head.ok){ url = testUrl; break; }
+  }catch(_){}
+}
+if (!url){
+  setStatus("Jet stream: no jet JSON found (expected ./wind_data.json).");
+  return;
+}
 
   try{
     const r = await fetch(url, { cache:"no-store" });
