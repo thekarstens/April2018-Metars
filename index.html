@@ -1807,7 +1807,7 @@ async function refreshParticlesIfOn(){
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const raw = await r.json();
-    const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
+    const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
 
     if (particlesLayer){
       try { map.removeLayer(particlesLayer); } catch(_) {}
@@ -1859,9 +1859,10 @@ async function refreshJetIfOn(){
 
   // --- Choose a jet file (first existing wins) ---
   const JET_FILES = [
-    // Prefer the simple root-level file name:
+    // Preferred jet file name from Colab exporter:
+    "jet_stream_wind.json",
+    // Fallbacks:
     "wind_data.json",
-    // Also allow the same file inside a jetstream/ folder:
     "jetstream/wind_data.json",
     // Legacy / older filenames (kept for backward compatibility):
     "jetstream/jetstream_western_us_250mb_20180414_18Z.json",
