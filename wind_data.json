@@ -1,17 +1,17 @@
 [
     {
         "header": {
-            "la1": 85.0,
-            "lo1": -170.0,
+            "parameterCategory": 2,
+            "parameterNumber": 2,
+            "parameterNumberName": "eastward_wind",
+            "parameterUnit": "m/s",
             "nx": 121,
             "ny": 76,
+            "lo1": -170.0,
+            "la1": 85.0,
             "dx": 1.0,
             "dy": -1.0,
-            "refTime": "2018-04-11T00:00:00Z",
-            "parameterUnit": "m/s",
-            "parameterNumber": 2,
-            "parameterCategory": 2,
-            "forecastTime": 0
+            "refTime": "2018-04-11T00:00:00Z"
         },
         "data": [
             0.0,
@@ -9214,17 +9214,17 @@
     },
     {
         "header": {
-            "la1": 85.0,
-            "lo1": -170.0,
+            "parameterCategory": 2,
+            "parameterNumber": 3,
+            "parameterNumberName": "northward_wind",
+            "parameterUnit": "m/s",
             "nx": 121,
             "ny": 76,
+            "lo1": -170.0,
+            "la1": 85.0,
             "dx": 1.0,
             "dy": -1.0,
-            "refTime": "2018-04-11T00:00:00Z",
-            "parameterUnit": "m/s",
-            "parameterNumber": 3,
-            "parameterCategory": 2,
-            "forecastTime": 0
+            "refTime": "2018-04-11T00:00:00Z"
         },
         "data": [
             0.0,
