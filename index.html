@@ -975,6 +975,18 @@ updateCityLabels();
 map.attributionControl.setPrefix(false);
 
 const statusEl = document.getElementById("status");
+
+function debugVelocityCanvases(tag="velocity"){
+  try{
+    const canvases=[...document.querySelectorAll('canvas')];
+    const info=canvases.map(c=>{
+      const r=c.getBoundingClientRect();
+      return {w:Math.round(r.width),h:Math.round(r.height),cls:c.className,parent:(c.parentElement&&c.parentElement.className)||c.parentElement?.tagName};
+    }).filter(o=>o.w>200&&o.h>200);
+    console.log(`[${tag}] canvases:`, info);
+  }catch(e){ console.warn("debugVelocityCanvases failed", e); }
+}
+
 function setStatus(msg){ if (statusEl) statusEl.textContent = msg; }
 
 /* ------------------------------------------------------------
@@ -2001,6 +2013,7 @@ async function refreshParticlesIfOn(){
 
     particlesLayer = L.velocityLayer({
       data: velData,
+      pane: 'overlayPane',
       velocityScale: 0.01,
       particleAge: 120,
       particleMultiplier: 1/700,
@@ -2018,6 +2031,7 @@ async function refreshParticlesIfOn(){
     });
 
     particlesLayer.addTo(map);
+    debugVelocityCanvases('particles');
     forceVelocityIntoMap();
 
   setTimeout(() => resyncVelocityLayer(particlesLayer), 50);
@@ -2205,6 +2219,7 @@ async function refreshJetIfOn(){
     });
 
     jetLayer.addTo(map);
+    debugVelocityCanvases('jet');
     setStatus(`Jet stream loaded: ${url.replace("./","")}`);
 
   }catch(e){
