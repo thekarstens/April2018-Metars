@@ -569,14 +569,11 @@
 }
 
 #map{
-  position: fixed;
-  top: 0;
+  position: absolute;
+  top: var(--banner-offset);
   left: 0;
   right: 0;
   bottom: 0;
-  width: 100%;
-  height: 100vh;
-  overflow: hidden;
 }
 
 
@@ -599,10 +596,7 @@ canvas.leaflet-velocity-overlay{
 
 
 /* === FIX: Do NOT offset Leaflet panes (this breaks velocity canvas alignment) === */
-.leaflet-pane, .leaflet-map-pane, .leaflet-tile-pane, .leaflet-overlay-pane, .leaflet-shadow-pane, .leaflet-marker-pane, .leaflet-tooltip-pane, .leaflet-popup-pane{
-  top: 0 !important;
-  left: 0 !important;
-}
+/* (removed) pane top/left override; Leaflet handles pane positioning */
 /* Keep controls below the banner, but don't move the map panes */
 .leaflet-control-container{ pointer-events:none; }
 .leaflet-control-container *{ pointer-events:auto; }
@@ -662,189 +656,8 @@ canvas.leaflet-velocity-overlay{
 const map = L.map("map", { zoomControl:true }).setView([44.2, -96.5], 6);
 
 // ---------------------------------------------------------------------
-// FIX: keep leaflet-velocity canvases INSIDE the Leaflet map panes.
-// Some builds of leaflet-velocity will momentarily insert its canvas/container
-// under <body>, which makes the particles draw at the top of the page
-// instead of over the map (especially with an overlay banner).
-// We watch for those nodes and immediately re-parent them into overlayPane.
-// ---------------------------------------------------------------------
-function _relocateVelocityDom(){
-  try{
-    if (!map || !map.getPanes) return;
-    const overlayPane = map.getPanes().overlayPane;
-    if (!overlayPane) return;
+/* (removed) leaflet-velocity DOM relocation workaround (not needed with #map absolute layout) */
 
-    const selectors = [
-      ".leaflet-velocity-layer",
-      ".leaflet-velocity-container",
-      ".leaflet-velocity-overlay",
-      "canvas.leaflet-velocity-overlay",
-      "canvas.leaflet-velocity-layer"
-    ];
-
-    document.querySelectorAll(selectors.join(",")).forEach((node) => {
-      if (!node) return;
-      // If node isn't already in the map container, move it.
-      if (!map.getContainer().contains(node)){
-        overlayPane.appendChild(node);
-      } else if (node.parentElement !== overlayPane && node.tagName === "CANVAS"){
-        overlayPane.appendChild(node);
-      }
-      node.style.position = "absolute";
-      node.style.left = "0";
-      node.style.top = "0";
-      node.style.pointerEvents = "none";
-      node.style.zIndex = "350";
-    });
-  }catch(e){
-    console.warn("velocity DOM relocate failed:", e);
-  }
-}
-
-// Run once after initial layout, and again after Leaflet settles.
-setTimeout(_relocateVelocityDom, 0);
-setTimeout(_relocateVelocityDom, 250);
-
-// Observe DOM insertions so we catch canvases created AFTER toggle-on.
-(function(){
-  try{
-    const obs = new MutationObserver(() => _relocateVelocityDom());
-    obs.observe(document.body, { childList:true, subtree:true });
-    map.on("zoomstart movestart", _relocateVelocityDom);
-    map.on("zoomend moveend resize", _relocateVelocityDom);
-  }catch(e){
-    console.warn("MutationObserver unavailable:", e);
-  }
-})();
-window.map = map;
-// Keep leaflet-velocity canvases INSIDE the Leaflet map panes (prevents "drawn at top of page" issue)
-(function setupVelocityDomObserver(){
-  try{
-    const observer = new MutationObserver((mutList)=>{
-      let touched = false;
-      for (const m of mutList){
-        if (m.addedNodes && m.addedNodes.length){
-          touched = true; break;
-        }
-      }
-      if (touched) forceVelocityIntoMap();
-    });
-    observer.observe(document.body, { childList:true, subtree:true });
-  }catch(_){}
-})();
-map.on("zoomend moveend resize", () => forceVelocityIntoMap());
-
-// --- leaflet-velocity DOM/pane alignment helpers ---
-// If the velocity layer's canvas/container ends up attached to <body>, it will draw at the
-// top of the page instead of over the Leaflet map. We force the *container* into overlayPane.
-
-// --- leaflet-velocity DOM/pane alignment helpers ---
-// leaflet-velocity sometimes inserts its canvas/container into <body>.
-// If that happens (and because our map is pushed down by the banner),
-// the particles render "above" the map. We force any velocity DOM into the map's overlayPane.
-function forceVelocityIntoMap(){
-  // Robustly re-parent any leaflet-velocity DOM (canvas/wrapper) into the Leaflet overlayPane
-  // so it is clipped and transformed with the map (and not drawn at the top of the page).
-  if (!map || !map.getPanes) return;
-  const panes = map.getPanes();
-  const overlayPane = panes && panes.overlayPane ? panes.overlayPane : null;
-  const mapEl = map.getContainer ? map.getContainer() : document.getElementById("map");
-  if (!overlayPane || !mapEl) return;
-
-  const mapSize = map.getSize ? map.getSize() : null;
-
-  const isVelocityNode = (el) => {
-    if (!el || !el.classList) return false;
-    const cls = (el.className || "").toString().toLowerCase();
-    const id  = (el.id || "").toString().toLowerCase();
-    return cls.includes("velocity") || cls.includes("wind") || id.includes("velocity") || id.includes("wind");
-  };
-
-  const maybeMove = (node) => {
-    if (!node || node.nodeType !== 1) return;
-    // Find the wrapper we should move (prefer a div wrapper if canvas is inside one)
-    let wrapper = node;
-    if (wrapper.tagName === "CANVAS" && wrapper.parentElement) wrapper = wrapper.parentElement;
-
-    // Walk up to a reasonable wrapper that looks like velocity
-    let cur = wrapper;
-    for (let i=0; i<4 && cur && cur !== document.body; i++){
-      if (isVelocityNode(cur)) { wrapper = cur; break; }
-      cur = cur.parentElement;
-    }
-
-    // If we couldn't identify by class, use canvas size heuristic
-    const canv = (node.tagName === "CANVAS") ? node : (node.querySelector ? node.querySelector("canvas") : null);
-    const sizeMatch = !!(mapSize && canv && canv.width === mapSize.x && canv.height === mapSize.y);
-    const looksLikeVelocity = isVelocityNode(wrapper) || isVelocityNode(node) || sizeMatch;
-
-    if (!looksLikeVelocity) return;
-
-    // If already inside map container, we're good
-    if (mapEl.contains(wrapper)) return;
-
-    try{
-      overlayPane.appendChild(wrapper);
-      wrapper.style.position = "absolute";
-      wrapper.style.left = "0px";
-      wrapper.style.top  = "0px";
-      wrapper.style.width  = "100%";
-      wrapper.style.height = "100%";
-      wrapper.style.pointerEvents = "none";
-      wrapper.style.zIndex = "350";
-    }catch(_){}
-  };
-
-  // Scan common candidates
-  const candidates = [
-    ...document.querySelectorAll(".leaflet-velocity-layer, .leaflet-velocity-container, .leaflet-velocity-overlay, canvas.leaflet-velocity-layer, canvas.leaflet-velocity-overlay, canvas.velocity-overlay, canvas.wind-overlay"),
-    ...document.querySelectorAll("canvas")
-  ];
-
-  candidates.forEach(maybeMove);
-
-  // Ensure any velocity canvases match map size (some builds create them full-page)
-  if (mapSize){
-    overlayPane.querySelectorAll("canvas").forEach((c)=>{
-      const cls=(c.className||"").toLowerCase();
-      if (!cls.includes("velocity") && !cls.includes("wind") && c.width!==mapSize.x && c.height!==mapSize.y) return;
-      if (c.width !== mapSize.x) c.width = mapSize.x;
-      if (c.height !== mapSize.y) c.height = mapSize.y;
-      c.style.width = mapSize.x + "px";
-      c.style.height = mapSize.y + "px";
-      c.style.pointerEvents = "none";
-    });
-  }
-}
-
-function attachVelocityContainerToOverlay(layer){ forceVelocityIntoMap(layer); }
-
-function resyncVelocityLayer(layer){
-  try{
-    if (!layer || !map) return;
-    forceVelocityIntoMap(layer);
-    const s = map.getSize();
-    const canvas =
-      layer._canvas ||
-      layer._velocityCanvas ||
-      (layer._container && layer._container.querySelector ? layer._container.querySelector("canvas") : null);
-
-    if (canvas){
-      // Backing store must match the actual map pixel size
-      if (canvas.width !== s.x) canvas.width = s.x;
-      if (canvas.height !== s.y) canvas.height = s.y;
-      canvas.style.width = s.x + "px";
-      canvas.style.height = s.y + "px";
-      canvas.style.display = "block";
-      canvas.style.position = "absolute";
-      canvas.style.left = "0";
-      canvas.style.top = "0";
-      canvas.style.pointerEvents = "none";
-    }
-  }catch(e){
-    console.warn("resyncVelocityLayer failed:", e);
-  }
-}
 /* ------------------------------------------------------------
    Story START button (temporary: opens your Google Sheet in a new tab)
 ------------------------------------------------------------ */
@@ -976,15 +789,6 @@ map.attributionControl.setPrefix(false);
 
 const statusEl = document.getElementById("status");
 
-function debugVelocityCanvases(tag="velocity"){
-  try{
-    const canvases=[...document.querySelectorAll('canvas')];
-    const info=canvases.map(c=>{
-      const r=c.getBoundingClientRect();
-      return {w:Math.round(r.width),h:Math.round(r.height),cls:c.className,parent:(c.parentElement&&c.parentElement.className)||c.parentElement?.tagName};
-    }).filter(o=>o.w>200&&o.h>200);
-    console.log(`[${tag}] canvases:`, info);
-  }catch(e){ console.warn("debugVelocityCanvases failed", e); }
 }
 
 function setStatus(msg){ if (statusEl) statusEl.textContent = msg; }
@@ -2033,17 +1837,12 @@ async function refreshParticlesIfOn(){
     particlesLayer.addTo(map);
     setTimeout(() => {
       try { map.invalidateSize({ animate: false, pan: false }); } catch(_) {}
-      debugVelocityCanvases('particles (after invalidateSize)');
     }, 150);
-    debugVelocityCanvases('particles');
-    forceVelocityIntoMap();
 
-  setTimeout(() => resyncVelocityLayer(particlesLayer), 50);
     attachVelocityContainerToOverlay(particlesLayer);
     setTimeout(updateBannerOffset, 60);
     // ensure velocity canvas matches final map size
     setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityContainerToOverlay(particlesLayer);
-  resyncVelocityLayer(particlesLayer); }, 60);
     setStatus(`Particles loaded: ${url.replace("./","")}`);
 
   } catch(e){
@@ -2227,9 +2026,7 @@ async function refreshJetIfOn(){
     // Ensure map has finalized its layout before sizing the velocity canvas
     setTimeout(() => {
       try { map.invalidateSize({ animate: false, pan: false }); } catch(_) {}
-      debugVelocityCanvases('jet (after invalidateSize)');
     }, 150);
-    debugVelocityCanvases('jet');
     setStatus(`Jet stream loaded: ${url.replace("./","")}`);
 
   }catch(e){
