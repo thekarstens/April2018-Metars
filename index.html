@@ -2031,6 +2031,10 @@ async function refreshParticlesIfOn(){
     });
 
     particlesLayer.addTo(map);
+    setTimeout(() => {
+      try { map.invalidateSize({ animate: false, pan: false }); } catch(_) {}
+      debugVelocityCanvases('particles (after invalidateSize)');
+    }, 150);
     debugVelocityCanvases('particles');
     forceVelocityIntoMap();
 
@@ -2203,6 +2207,7 @@ async function refreshJetIfOn(){
     }
 
     jetLayer = L.velocityLayer({
+      pane: 'overlayPane',
       data: [uRec, vRec],
       displayValues: true,
       displayOptions: {
@@ -2219,6 +2224,11 @@ async function refreshJetIfOn(){
     });
 
     jetLayer.addTo(map);
+    // Ensure map has finalized its layout before sizing the velocity canvas
+    setTimeout(() => {
+      try { map.invalidateSize({ animate: false, pan: false }); } catch(_) {}
+      debugVelocityCanvases('jet (after invalidateSize)');
+    }, 150);
     debugVelocityCanvases('jet');
     setStatus(`Jet stream loaded: ${url.replace("./","")}`);
 
