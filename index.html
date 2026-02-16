@@ -789,7 +789,6 @@ map.attributionControl.setPrefix(false);
 
 const statusEl = document.getElementById("status");
 
-}
 
 function setStatus(msg){ if (statusEl) statusEl.textContent = msg; }
 
@@ -1839,10 +1838,8 @@ async function refreshParticlesIfOn(){
       try { map.invalidateSize({ animate: false, pan: false }); } catch(_) {}
     }, 150);
 
-    attachVelocityContainerToOverlay(particlesLayer);
     setTimeout(updateBannerOffset, 60);
     // ensure velocity canvas matches final map size
-    setTimeout(() => { try{ map.invalidateSize(false); }catch(_){}; attachVelocityContainerToOverlay(particlesLayer);
     setStatus(`Particles loaded: ${url.replace("./","")}`);
 
   } catch(e){
