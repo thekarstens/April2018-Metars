@@ -1916,7 +1916,15 @@ async function refreshJetIfOn(){
       if (typeof H.lo1 === "number" && H.lo1 > 180) H.lo1 -= 360;
       if (typeof H.lo2 === "number" && H.lo2 > 180) H.lo2 -= 360;
 
-      // Compute la2/lo2 if missing
+      // If both corners are known, recompute dx/dy from corners (fixes bad sign issues)
+      if (typeof H.lo1 === "number" && typeof H.lo2 === "number" && typeof H.nx === "number" && H.nx > 1){
+        H.dx = (H.lo2 - H.lo1) / (H.nx - 1);
+      }
+      if (typeof H.la1 === "number" && typeof H.la2 === "number" && typeof H.ny === "number" && H.ny > 1){
+        H.dy = (H.la2 - H.la1) / (H.ny - 1);
+      }
+
+      // Compute missing corners if needed
       if (typeof H.la2 !== "number" && typeof H.la1 === "number" && typeof H.dy === "number" && typeof H.ny === "number"){
         H.la2 = H.la1 + H.dy * (H.ny - 1);
       }
@@ -1924,29 +1932,16 @@ async function refreshJetIfOn(){
         H.lo2 = H.lo1 + H.dx * (H.nx - 1);
       }
 
-      // Ensure north-to-south scan: la1 should be north edge, la2 south edge, dy negative
-      if (typeof H.la1 === "number" && typeof H.la2 === "number"){
-        const north = Math.max(H.la1, H.la2);
-        const south = Math.min(H.la1, H.la2);
-        H.la1 = north;
-        H.la2 = south;
-      }
-      if (typeof H.dy === "number"){
-        H.dy = -Math.abs(H.dy);
-      }
-
-      // Clamp to WebMercator limits to avoid pole weirdness
+      // Clamp to WebMercator limits to avoid pole weirdness (keep orientation as-is)
       const LIM = 85.05112878;
       if (typeof H.la1 === "number") H.la1 = Math.max(-LIM, Math.min(LIM, H.la1));
       if (typeof H.la2 === "number") H.la2 = Math.max(-LIM, Math.min(LIM, H.la2));
 
-      // Recompute la2 after clamp (keep step consistent) ONLY if la1/la2 order got changed above
-      if (typeof H.la1 === "number" && typeof H.dy === "number" && typeof H.ny === "number"){
+      // If clamping changed la1/la2 but we still have dy/ny, recompute la2 to keep step consistent
+      if (typeof H.la1 === "number" && typeof H.dy === "number" && typeof H.ny === "number" && H.ny > 1){
+        // Keep dy sign; just ensure la2 matches la1 + dy*(ny-1)
         H.la2 = H.la1 + H.dy * (H.ny - 1);
         H.la2 = Math.max(-LIM, Math.min(LIM, H.la2));
-      }
-      if (typeof H.lo1 === "number" && typeof H.dx === "number" && typeof H.nx === "number"){
-        H.lo2 = H.lo1 + H.dx * (H.nx - 1);
       }
 
       return H;
