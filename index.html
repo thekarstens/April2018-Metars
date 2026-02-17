@@ -1017,6 +1017,7 @@ let particlesLayer = null;
 // Jet stream (250mb) velocity particles (Leaflet-Velocity)
 const jetToggle = L.layerGroup();
 let jetLayer = null;
+let jetBoundsRect = null;
 
 L.control.layers(
   { "OpenStreetMap": osm, "MODIS True Color (Terra)": modis },
@@ -1902,52 +1903,56 @@ async function refreshJetIfOn(){
     // Helper: normalize header for leaflet-velocity
     function normalizeHeader(h){
       const H = {...h};
+
       // normalize keys
       H.nx = H.nx ?? H.Nx;
       H.ny = H.ny ?? H.Ny;
-      H.dx = H.dx ?? H.Dx;
-      H.dy = H.dy ?? H.Dy;
       H.la1 = H.la1 ?? H.La1 ?? H.lat1 ?? H.latitude1;
       H.lo1 = H.lo1 ?? H.Lo1 ?? H.lon1 ?? H.longitude1;
       H.la2 = H.la2 ?? H.La2 ?? H.lat2 ?? H.latitude2;
       H.lo2 = H.lo2 ?? H.Lo2 ?? H.lon2 ?? H.longitude2;
+      H.dx  = H.dx  ?? H.Dx;
+      H.dy  = H.dy  ?? H.Dy;
 
       // Convert 0..360 lon to -180..180 if needed
       if (typeof H.lo1 === "number" && H.lo1 > 180) H.lo1 -= 360;
       if (typeof H.lo2 === "number" && H.lo2 > 180) H.lo2 -= 360;
 
-      // Compute la2/lo2 if missing
-      if (typeof H.la2 !== "number" && typeof H.la1 === "number" && typeof H.dy === "number" && typeof H.ny === "number"){
-        H.la2 = H.la1 + H.dy * (H.ny - 1);
-      }
-      if (typeof H.lo2 !== "number" && typeof H.lo1 === "number" && typeof H.dx === "number" && typeof H.nx === "number"){
+      // Prefer computing dx/dy from corners when available (avoids sign flip bugs)
+      if (typeof H.lo1 === "number" && typeof H.lo2 === "number" && typeof H.nx === "number" && H.nx > 1){
+        H.dx = (H.lo2 - H.lo1) / (H.nx - 1);
+      } else if (typeof H.dx === "number" && typeof H.lo1 === "number" && typeof H.nx === "number" && H.nx > 1 && typeof H.lo2 !== "number"){
         H.lo2 = H.lo1 + H.dx * (H.nx - 1);
       }
 
-      // Ensure north-to-south scan: la1 should be north edge, la2 south edge, dy negative
+      if (typeof H.la1 === "number" && typeof H.la2 === "number" && typeof H.ny === "number" && H.ny > 1){
+        H.dy = (H.la2 - H.la1) / (H.ny - 1);
+      } else if (typeof H.dy === "number" && typeof H.la1 === "number" && typeof H.ny === "number" && H.ny > 1 && typeof H.la2 !== "number"){
+        H.la2 = H.la1 + H.dy * (H.ny - 1);
+      }
+
+      // If we have both corners, make sure la1 is north edge and dy matches
       if (typeof H.la1 === "number" && typeof H.la2 === "number"){
         const north = Math.max(H.la1, H.la2);
         const south = Math.min(H.la1, H.la2);
         H.la1 = north;
         H.la2 = south;
-      }
-      if (typeof H.dy === "number"){
-        H.dy = -Math.abs(H.dy);
+        if (typeof H.dy === "number" && H.dy > 0) H.dy = -H.dy;
       }
 
-      // Clamp to WebMercator limits to avoid pole weirdness
+      // If we have both corners, make sure lo1 is west edge and dx matches
+      if (typeof H.lo1 === "number" && typeof H.lo2 === "number"){
+        const west = Math.min(H.lo1, H.lo2);
+        const east = Math.max(H.lo1, H.lo2);
+        H.lo1 = west;
+        H.lo2 = east;
+        if (typeof H.dx === "number" && H.dx < 0) H.dx = -H.dx;
+      }
+
+      // Clamp latitudes to WebMercator limits
       const LIM = 85.05112878;
       if (typeof H.la1 === "number") H.la1 = Math.max(-LIM, Math.min(LIM, H.la1));
       if (typeof H.la2 === "number") H.la2 = Math.max(-LIM, Math.min(LIM, H.la2));
-
-      // Recompute la2 after clamp (keep step consistent) ONLY if la1/la2 order got changed above
-      if (typeof H.la1 === "number" && typeof H.dy === "number" && typeof H.ny === "number"){
-        H.la2 = H.la1 + H.dy * (H.ny - 1);
-        H.la2 = Math.max(-LIM, Math.min(LIM, H.la2));
-      }
-      if (typeof H.lo1 === "number" && typeof H.dx === "number" && typeof H.nx === "number"){
-        H.lo2 = H.lo1 + H.dx * (H.nx - 1);
-      }
 
       return H;
     }
@@ -1986,6 +1991,20 @@ async function refreshJetIfOn(){
     // Sanity log so you can SEE where the file thinks it is
     const hb = uRec.header;
     console.log("Jet header (normalized):", hb);
+    // Debug: show the data bounding box on the map (red outline)
+    if (jetBoundsRect){
+      try{ map.removeLayer(jetBoundsRect); }catch(_){}
+      jetBoundsRect = null;
+    }
+    if (typeof hb.la1 === "number" && typeof hb.la2 === "number" && typeof hb.lo1 === "number" && typeof hb.lo2 === "number"){
+      const south = Math.min(hb.la1, hb.la2);
+      const north = Math.max(hb.la1, hb.la2);
+      const west  = Math.min(hb.lo1, hb.lo2);
+      const east  = Math.max(hb.lo1, hb.lo2);
+      jetBoundsRect = L.rectangle([[south, west],[north, east]], {color:"#ff0000", weight:2, fill:false, interactive:false});
+      jetBoundsRect.addTo(map);
+      console.log("Jet bounds rectangle:", {north, south, west, east});
+    }
     // Remove old layer
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
@@ -2037,6 +2056,10 @@ map.on("overlayremove", (e) => {
   if (e.layer === jetToggle && jetLayer){
     map.removeLayer(jetLayer);
     jetLayer = null;
+  }
+  if (e.layer === jetToggle && jetBoundsRect){
+    try{ map.removeLayer(jetBoundsRect); }catch(_){ }
+    jetBoundsRect = null;
   }
 });
 
