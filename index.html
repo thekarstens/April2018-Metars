@@ -1957,26 +1957,52 @@ async function refreshJetIfOn(){
       return H;
     }
 
-    // Build u/v records
+    // Build u/v records (robust: find by header keys, not array order)
     let uRec = null, vRec = null;
 
-    if (arr.length >= 2 && arr[0].header && arr[1].header){
-      // already separate u/v
-      uRec = { header: normalizeHeader(arr[0].header), data: arr[0].data.slice() };
-      vRec = { header: normalizeHeader(arr[1].header), data: arr[1].data.slice() };
+    // Filter to valid records that look like {header, data}
+    const recs = (arr || []).filter(r => r && r.header && Array.isArray(r.data));
+
+    function looksLikeU(h){
+      const pn = h.parameterNumber;
+      const sn = (h.shortName || "").toLowerCase();
+      const name = (h.parameterNumberName || "").toLowerCase();
+      return pn === 2 || sn === "u" || name.includes("u_component") || name === "eastward_wind" || name.includes("eastward");
+    }
+    function looksLikeV(h){
+      const pn = h.parameterNumber;
+      const sn = (h.shortName || "").toLowerCase();
+      const name = (h.parameterNumberName || "").toLowerCase();
+      return pn === 3 || sn === "v" || name.includes("v_component") || name === "northward_wind" || name.includes("northward");
+    }
+
+    if (recs.length >= 2){
+      // Try to pick u and v specifically
+      const ru = recs.find(r => looksLikeU(r.header));
+      const rv = recs.find(r => looksLikeV(r.header));
+
+      if (ru && rv){
+        uRec = { header: normalizeHeader(ru.header), data: ru.data.slice() };
+        vRec = { header: normalizeHeader(rv.header), data: rv.data.slice() };
+      } else {
+        // Fallback: just take first two valid records
+        uRec = { header: normalizeHeader(recs[0].header), data: recs[0].data.slice() };
+        vRec = { header: normalizeHeader(recs[1].header), data: recs[1].data.slice() };
+      }
+
       // enforce short names (helps some versions)
       uRec.header.shortName = "u";
       vRec.header.shortName = "v";
       uRec.header.parameterNumberName = uRec.header.parameterNumberName || "u_component_of_wind";
       vRec.header.parameterNumberName = vRec.header.parameterNumberName || "v_component_of_wind";
-    }else{
-      // interleaved (u0,v0,u1,v1,...)
+    } else {
+      // interleaved (u0,v0,u1,v1,...) in a single record
       const h0 = normalizeHeader(first.header);
       const nx = h0.nx, ny = h0.ny;
       const n = nx * ny;
       const expected = n * 2;
-      if (first.data.length !== expected){
-        throw new Error(`Interleaved length mismatch: expected ${expected}, got ${first.data.length}`);
+      if (!Array.isArray(first.data) || first.data.length !== expected){
+        throw new Error(`Interleaved length mismatch: expected ${expected}, got ${first.data ? first.data.length : "null"}`);
       }
       const u = new Array(n);
       const v = new Array(n);
@@ -1984,12 +2010,15 @@ async function refreshJetIfOn(){
         u[i] = first.data[j];
         v[i] = first.data[j+1];
       }
-      uRec = { header: {...h0, shortName:"u", parameterNumberName:"u_component_of_wind"}, data: u };
-      vRec = { header: {...h0, shortName:"v", parameterNumberName:"v_component_of_wind"}, data: v };
+      uRec = { header: {...h0, shortName:"u", parameterNumberName:"u_component_of_wind", parameterNumber:2}, data: u };
+      vRec = { header: {...h0, shortName:"v", parameterNumberName:"v_component_of_wind", parameterNumber:3}, data: v };
     }
 
-    
-    // --- Jet grid orientation fix (prevents "off the top" rendering) ---
+    if (!uRec || !vRec || !uRec.data || !vRec.data){
+      throw new Error("Could not build u/v records (uRec/vRec missing).");
+    }
+
+// --- Jet grid orientation fix (prevents "off the top" rendering) ---
     // Some velocity JSONs are north->south with negative dy; in this app/Leaflet setup,
     // leaflet-velocity behaves correctly when la1 is SOUTH and dy is POSITIVE.
     function _flipRows(arr, nx, ny){
