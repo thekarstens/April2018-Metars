@@ -1988,6 +1988,67 @@ async function refreshJetIfOn(){
       vRec = { header: {...h0, shortName:"v", parameterNumberName:"v_component_of_wind"}, data: v };
     }
 
+    
+    // --- Jet grid orientation fix (prevents "off the top" rendering) ---
+    // Some velocity JSONs are north->south with negative dy; in this app/Leaflet setup,
+    // leaflet-velocity behaves correctly when la1 is SOUTH and dy is POSITIVE.
+    function _flipRows(arr, nx, ny){
+      const out = new Array(arr.length);
+      for (let y=0; y<ny; y++){
+        const srcY = (ny - 1 - y);
+        const srcOff = srcY * nx;
+        const dstOff = y * nx;
+        for (let x=0; x<nx; x++){
+          out[dstOff + x] = arr[srcOff + x];
+        }
+      }
+      return out;
+    }
+    function _flipCols(arr, nx, ny){
+      const out = new Array(arr.length);
+      for (let y=0; y<ny; y++){
+        const rowOff = y * nx;
+        for (let x=0; x<nx; x++){
+          out[rowOff + x] = arr[rowOff + (nx - 1 - x)];
+        }
+      }
+      return out;
+    }
+    function _fixJetOrientation(uRec, vRec){
+      if (!uRec || !vRec || !uRec.header) return;
+      const h = uRec.header;
+      const nx = h.nx, ny = h.ny;
+      if (!(Number.isFinite(nx) && Number.isFinite(ny) && nx>1 && ny>1)) return;
+
+      // Fix column direction if dx is negative
+      if (Number.isFinite(h.dx) && h.dx < 0){
+        uRec.data = _flipCols(uRec.data, nx, ny);
+        vRec.data = _flipCols(vRec.data, nx, ny);
+        const lo1 = h.lo1, lo2 = h.lo2;
+        h.lo1 = lo2; h.lo2 = lo1;
+        h.dx = Math.abs(h.dx);
+      }
+
+      // Fix row direction if dy is negative OR la1 is north of la2
+      const needsRowFlip =
+        (Number.isFinite(h.dy) && h.dy < 0) ||
+        (Number.isFinite(h.la1) && Number.isFinite(h.la2) && h.la1 > h.la2);
+
+      if (needsRowFlip){
+        uRec.data = _flipRows(uRec.data, nx, ny);
+        vRec.data = _flipRows(vRec.data, nx, ny);
+        const la1 = h.la1, la2 = h.la2;
+        h.la1 = la2; h.la2 = la1;
+        h.dy = Math.abs(h.dy);
+      }
+
+      // Mirror header changes to v record header
+      vRec.header = {...uRec.header, shortName:"v", parameterNumberName:"v_component_of_wind"};
+      uRec.header = {...uRec.header, shortName:"u", parameterNumberName:"u_component_of_wind"};
+    }
+    _fixJetOrientation(uRec, vRec);
+
+
     // Sanity log so you can SEE where the file thinks it is
     const hb = uRec.header;
     console.log("Jet header (normalized):", hb);
