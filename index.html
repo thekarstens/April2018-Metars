@@ -1807,7 +1807,7 @@ async function refreshParticlesIfOn(){
     const r = await fetch(url, { cache:"no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const raw = await r.json();
-    const velData = normalizeVelocityJson(raw, { flipDyPositive: true });
+    const velData = normalizeVelocityJson(raw, { flipDyPositive: false });
 
     if (particlesLayer){
       try { map.removeLayer(particlesLayer); } catch(_) {}
@@ -1916,15 +1916,7 @@ async function refreshJetIfOn(){
       if (typeof H.lo1 === "number" && H.lo1 > 180) H.lo1 -= 360;
       if (typeof H.lo2 === "number" && H.lo2 > 180) H.lo2 -= 360;
 
-      // If both corners are known, recompute dx/dy from corners (fixes bad sign issues)
-      if (typeof H.lo1 === "number" && typeof H.lo2 === "number" && typeof H.nx === "number" && H.nx > 1){
-        H.dx = (H.lo2 - H.lo1) / (H.nx - 1);
-      }
-      if (typeof H.la1 === "number" && typeof H.la2 === "number" && typeof H.ny === "number" && H.ny > 1){
-        H.dy = (H.la2 - H.la1) / (H.ny - 1);
-      }
-
-      // Compute missing corners if needed
+      // Compute la2/lo2 if missing
       if (typeof H.la2 !== "number" && typeof H.la1 === "number" && typeof H.dy === "number" && typeof H.ny === "number"){
         H.la2 = H.la1 + H.dy * (H.ny - 1);
       }
@@ -1932,16 +1924,29 @@ async function refreshJetIfOn(){
         H.lo2 = H.lo1 + H.dx * (H.nx - 1);
       }
 
-      // Clamp to WebMercator limits to avoid pole weirdness (keep orientation as-is)
+      // Ensure north-to-south scan: la1 should be north edge, la2 south edge, dy negative
+      if (typeof H.la1 === "number" && typeof H.la2 === "number"){
+        const north = Math.max(H.la1, H.la2);
+        const south = Math.min(H.la1, H.la2);
+        H.la1 = north;
+        H.la2 = south;
+      }
+      if (typeof H.dy === "number"){
+        H.dy = -Math.abs(H.dy);
+      }
+
+      // Clamp to WebMercator limits to avoid pole weirdness
       const LIM = 85.05112878;
       if (typeof H.la1 === "number") H.la1 = Math.max(-LIM, Math.min(LIM, H.la1));
       if (typeof H.la2 === "number") H.la2 = Math.max(-LIM, Math.min(LIM, H.la2));
 
-      // If clamping changed la1/la2 but we still have dy/ny, recompute la2 to keep step consistent
-      if (typeof H.la1 === "number" && typeof H.dy === "number" && typeof H.ny === "number" && H.ny > 1){
-        // Keep dy sign; just ensure la2 matches la1 + dy*(ny-1)
+      // Recompute la2 after clamp (keep step consistent) ONLY if la1/la2 order got changed above
+      if (typeof H.la1 === "number" && typeof H.dy === "number" && typeof H.ny === "number"){
         H.la2 = H.la1 + H.dy * (H.ny - 1);
         H.la2 = Math.max(-LIM, Math.min(LIM, H.la2));
+      }
+      if (typeof H.lo1 === "number" && typeof H.dx === "number" && typeof H.nx === "number"){
+        H.lo2 = H.lo1 + H.dx * (H.nx - 1);
       }
 
       return H;
@@ -2226,19 +2231,19 @@ refreshAll().catch(err => {
 
 
 <script>
-(function(){
-  function updateBannerOffset(){
-    const b = document.getElementById('banner');
-    if(!b) return;
-    document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 8) + 'px');
-    // If Leaflet map exists, force a resize so overlays (incl. velocity) align.
-    if (window.map && typeof window.map.invalidateSize === 'function'){
-      window.map.invalidateSize(true);
-    }
-  }
-  window.addEventListener('load', updateBannerOffset);
-  window.addEventListener('resize', updateBannerOffset);
-})();
+/**
+ * Keep CSS --banner-offset in sync so the map sits below the header.
+ * Must be global because other functions call updateBannerOffset().
+ */
+function updateBannerOffset(){
+  const b = document.getElementById('banner');
+  if(!b) return;
+  document.documentElement.style.setProperty('--banner-offset', (b.offsetHeight + 8) + 'px');
+  try{ if (window.map) window.map.invalidateSize(true); }catch(_){}
+}
+window.updateBannerOffset = updateBannerOffset;
+document.addEventListener('DOMContentLoaded', updateBannerOffset);
+window.addEventListener('resize', updateBannerOffset);
 </script>
 
 
