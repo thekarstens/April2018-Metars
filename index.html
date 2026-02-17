@@ -1986,21 +1986,6 @@ async function refreshJetIfOn(){
     // Sanity log so you can SEE where the file thinks it is
     const hb = uRec.header;
     console.log("Jet header (normalized):", hb);
-// DEBUG: always fit map to jet bounds when turning on Jet (helps verify alignment)
-try{
-  const lo2 = (hb.lo2 != null) ? hb.lo2 : (hb.lo1 + hb.dx * (hb.nx - 1));
-  const la2 = (hb.la2 != null) ? hb.la2 : (hb.la1 + hb.dy * (hb.ny - 1)); // dy should be negative
-  const b = L.latLngBounds([la2, hb.lo1],[hb.la1, lo2]);
-  map.fitBounds(b.pad(0.05), { animate:false });
-}catch(_){}
-
-// DEBUG: mark strongest-wind point from Colab diagnostic
-try{
-  if (window.__jetMaxMarker){ map.removeLayer(window.__jetMaxMarker); window.__jetMaxMarker = null; }
-  window.__jetMaxMarker = L.circleMarker([42.3550077914, -64.8984375], {
-    radius: 6, color: "red", weight: 2, fillColor: "yellow", fillOpacity: 1
-  }).addTo(map).bindPopup("Max Wind Location (debug)");
-}catch(_){}
     // Remove old layer
     if (jetLayer){
       try{ map.removeLayer(jetLayer); }catch(_){}
