@@ -1281,50 +1281,151 @@ function normalizeWxCode(s){
   return (s || "").toUpperCase().replace(/\s+/g, " ").trim();
 }
 
-function pickWxEmoji(wxcodes, isDay){
-  // Priority-based parsing. Works even if multiple codes exist ("-SN BR").
+function pickWxIconType(wxcodes, isDay){
   const wx = normalizeWxCode(wxcodes);
 
-  // If no codes, treat as "clear/none"
-  if (!wx) return isDay ? "☀️" : "🌙";
+  if (!wx) return isDay ? "CLEAR_DAY" : "CLEAR_NIGHT";
+
+  const hasTS   = wx.includes("TS");
+  const hasFZRA = wx.includes("FZRA");
+  const hasPL   = wx.includes("PL") || wx.includes("IC");
+  const hasSN   = wx.includes("SN") || wx.includes("SG");
+  const hasRA   = wx.includes("RA") || wx.includes("DZ");
+  const hasSH   = wx.includes("SH");
+  const hasFG   = wx.includes("FG") || wx.includes("BR");
+  const hasHZ   = wx.includes("HZ") || wx.includes("FU") || wx.includes("DU");
 
   // Thunder first
-  if (wx.includes("TS")) return "⛈️";
+  if (hasTS) return "TS";
 
-  // Freezing rain / ice pellets
-  if (wx.includes("FZRA") || wx.includes("PL") || wx.includes("IC")) return "🧊";
+  // “Wintry/ice” bucket
+  const hasICE = hasFZRA || hasPL;
 
-  // Snow / sleet / snow grains
-  if (wx.includes("SN") || wx.includes("SG")) return "🌨️";
+  // MIX logic: any meaningful combo of precip types
+  const precipTypes = [hasSN, (hasRA || hasSH), hasICE].filter(Boolean).length;
+  if (precipTypes >= 2) return "MIX";
 
-  // Rain / drizzle
-  if (wx.includes("RA") || wx.includes("DZ")) return "🌧️";
+  // Single-type precip
+  if (hasICE) return "ICE";
+  if (hasSN)  return "SNOW";
+  if (hasRA || hasSH) return "RAIN";
 
-  // Fog / mist / haze / smoke / blowing dust
-  if (wx.includes("FG") || wx.includes("BR") || wx.includes("HZ") || wx.includes("FU") || wx.includes("DU")) return "🌫️";
+  // Low vis / obscurations
+  if (hasFG) return "FOG";
+  if (hasHZ) return "HAZE";
 
-  // Showers
-  if (wx.includes("SH")) return "🌦️";
-
-  // Default: cloud (unknown or other)
-  return "☁️";
+  // Default cloud
+  return "CLOUD";
 }
 
+// Simple, non-cartoony SVGs (stroke icons) + MIX text
+function wxIconHTML(type){
+  const svgWrap = (inner) => `
+    <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
+      <svg viewBox="0 0 64 64" width="22" height="22" aria-hidden="true" style="display:block">
+        ${inner}
+      </svg>
+    </div>
+  `;
+
+  const stroke = `fill="none" stroke="#111" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"`;
+
+  if (type === "SNOW") {
+    return svgWrap(`
+      <g ${stroke}>
+        <line x1="32" y1="10" x2="32" y2="54" />
+        <line x1="10" y1="32" x2="54" y2="32" />
+        <line x1="16" y1="16" x2="48" y2="48" />
+        <line x1="48" y1="16" x2="16" y2="48" />
+      </g>
+    `);
+  }
+
+  if (type === "RAIN") {
+    return svgWrap(`
+      <g ${stroke}>
+        <path d="M32 10 C26 20 20 26 20 34 C20 42 25 50 32 50 C39 50 44 42 44 34 C44 26 38 20 32 10 Z" />
+        <line x1="18" y1="54" x2="18" y2="60" />
+        <line x1="32" y1="54" x2="32" y2="60" />
+        <line x1="46" y1="54" x2="46" y2="60" />
+      </g>
+    `);
+  }
+
+  if (type === "ICE") {
+    return svgWrap(`
+      <g ${stroke}>
+        <line x1="18" y1="14" x2="18" y2="50" />
+        <line x1="32" y1="14" x2="32" y2="56" />
+        <line x1="46" y1="14" x2="46" y2="50" />
+        <line x1="14" y1="14" x2="50" y2="14" />
+      </g>
+    `);
+  }
+
+  if (type === "MIX") {
+    return `<div style="
+      width:100%;height:100%;
+      display:flex;align-items:center;justify-content:center;
+      font:900 12px/1 Arial,sans-serif;
+      letter-spacing:.6px;
+      color:#111;">MIX</div>`;
+  }
+
+  if (type === "FOG") {
+    return svgWrap(`
+      <g ${stroke}>
+        <line x1="14" y1="28" x2="50" y2="28" />
+        <line x1="10" y1="36" x2="54" y2="36" />
+        <line x1="14" y1="44" x2="50" y2="44" />
+      </g>
+    `);
+  }
+
+  if (type === "TS") {
+    return svgWrap(`
+      <g ${stroke}>
+        <path d="M20 40 C14 40 12 34 16 30 C18 22 26 18 32 22 C36 18 44 20 46 28 C52 28 54 34 50 38" />
+        <polyline points="30,40 24,54 34,50 30,62" />
+      </g>
+    `);
+  }
+
+  if (type === "CLEAR_DAY") {
+    return svgWrap(`<circle cx="32" cy="32" r="10" ${stroke} />`);
+  }
+
+  if (type === "CLEAR_NIGHT") {
+    return svgWrap(`<path d="M40 18a14 14 0 1 0 6 26a16 16 0 1 1 -6 -26z" ${stroke} />`);
+  }
+
+  // CLOUD (default)
+  return svgWrap(`
+    <g ${stroke}>
+      <path d="M22 42h22c7 0 10-4 10-9s-3-9-9-9c-2-8-13-12-20-5c-6 0-11 5-11 11c0 6 4 12 8 12z"/>
+    </g>
+  `);
+}
+
+// Keep function name (wxEmojiIcon) so the rest of your code doesn’t need changes
 function wxEmojiIcon(wxcodes, isDay, size=30){
-  const emoji = pickWxEmoji(wxcodes, isDay);
-  // Slightly larger emoji for readability; keep the circle consistent.
+  const type = pickWxIconType(wxcodes, isDay);
+
   return L.divIcon({
     className:"",
     html:`<div class="dot"
-              style="width:${size}px;height:${size}px;
-                     background:rgba(255,255,255,0.92);
-                     border-color:#999;
-                     font-size:${Math.round(size*0.62)}px;
-                     line-height:1;">${emoji}</div>`,
+              style="
+                width:${size}px;height:${size}px;
+                background:rgba(255,255,255,0.96);
+                border-color:#777;
+                font-size:12px;
+                line-height:1;
+              ">${wxIconHTML(type)}</div>`,
     iconSize:[size,size],
     iconAnchor:[size/2,size/2]
   });
 }
+
 function windArrowIcon(bearingDeg, mph){
   const spd = (mph == null || !Number.isFinite(mph)) ? 0 : mph;
   const color = windColorMph(spd);
