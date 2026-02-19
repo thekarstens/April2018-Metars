@@ -1314,6 +1314,7 @@ function pickWxIconType(wxcodes, isDay){
   return "CLOUD";
 }
 
+
 function wxIconHTML(type, size){
   const px = Math.max(18, Math.round(size * 0.72));
   const svg = (inner) => `
@@ -1326,19 +1327,31 @@ function wxIconHTML(type, size){
   const stroke = (w=4, c="#555") => `fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"`;
 
   if (type === "SNOW"){
-    // Crisp snowflakes (blue-ish) so it clearly reads as snow at small sizes
+    // More realistic 6-arm snowflake with small branches (reads well at tiny sizes)
     return svg(`
-      <g ${stroke(4, "#2b83ff")}>
-        <line x1="32" y1="10" x2="32" y2="54" />
-        <line x1="10" y1="32" x2="54" y2="32" />
-        <line x1="16" y1="16" x2="48" y2="48" />
-        <line x1="48" y1="16" x2="16" y2="48" />
-      </g>
-      <g ${stroke(3, "#2b83ff")}>
-        <line x1="32" y1="10" x2="26" y2="16" />
-        <line x1="32" y1="10" x2="38" y2="16" />
-        <line x1="32" y1="54" x2="26" y2="48" />
-        <line x1="32" y1="54" x2="38" y2="48" />
+      <g ${stroke(3.6, "#2b83ff")}>
+        <!-- 6 main arms -->
+        <line x1="32" y1="8"  x2="32" y2="56"/>
+        <line x1="12" y1="20" x2="52" y2="44"/>
+        <line x1="12" y1="44" x2="52" y2="20"/>
+        <!-- end caps -->
+        <line x1="32" y1="8"  x2="27" y2="13"/><line x1="32" y1="8"  x2="37" y2="13"/>
+        <line x1="32" y1="56" x2="27" y2="51"/><line x1="32" y1="56" x2="37" y2="51"/>
+
+        <line x1="12" y1="20" x2="18" y2="20"/><line x1="12" y1="20" x2="15" y2="14"/>
+        <line x1="52" y1="44" x2="46" y2="44"/><line x1="52" y1="44" x2="49" y2="50"/>
+
+        <line x1="12" y1="44" x2="18" y2="44"/><line x1="12" y1="44" x2="15" y2="50"/>
+        <line x1="52" y1="20" x2="46" y2="20"/><line x1="52" y1="20" x2="49" y2="14"/>
+        <!-- mid-branches -->
+        <line x1="32" y1="18" x2="27" y2="23"/><line x1="32" y1="18" x2="37" y2="23"/>
+        <line x1="32" y1="46" x2="27" y2="41"/><line x1="32" y1="46" x2="37" y2="41"/>
+
+        <line x1="22" y1="26" x2="28" y2="26"/><line x1="22" y1="26" x2="25" y2="21"/>
+        <line x1="42" y1="38" x2="36" y2="38"/><line x1="42" y1="38" x2="39" y2="43"/>
+
+        <line x1="22" y1="38" x2="28" y2="38"/><line x1="22" y1="38" x2="25" y2="43"/>
+        <line x1="42" y1="26" x2="36" y2="26"/><line x1="42" y1="26" x2="39" y2="21"/>
       </g>
     `);
   }
@@ -1346,10 +1359,10 @@ function wxIconHTML(type, size){
   if (type === "RAIN"){
     // More blue rain + more defined cloud outline
     return svg(`
-      <g ${stroke(4, "#555")}>
+      <g ${stroke(4, "#4a4a4a")}>
         <path d="M22 40h22c7 0 10-4 10-9s-3-9-9-9c-2-8-13-12-20-5c-6 0-11 5-11 11c0 6 4 12 8 12z"/>
       </g>
-      <g ${stroke(4, "#0066ff")}>
+      <g ${stroke(4, "#0b66ff")}>
         <line x1="24" y1="46" x2="20" y2="56" />
         <line x1="36" y1="46" x2="32" y2="56" />
         <line x1="48" y1="46" x2="44" y2="56" />
@@ -1358,26 +1371,23 @@ function wxIconHTML(type, size){
   }
 
   if (type === "CLOUD"){
+    // Stronger outline so clouds read clearly
     return svg(`
-      <g ${stroke(4, "#555")}>
+      <g ${stroke(4, "#4a4a4a")}>
         <path d="M22 42h22c7 0 10-4 10-9s-3-9-9-9c-2-8-13-12-20-5c-6 0-11 5-11 11c0 6 4 12 8 12z"/>
       </g>
     `);
   }
 
+  // The horizontal "lines" you saw were the fog icon. Use readable text instead.
   if (type === "FOG"){
-    return svg(`
-      <g ${stroke(4, "#555")}>
-        <line x1="14" y1="28" x2="50" y2="28" />
-        <line x1="10" y1="38" x2="54" y2="38" />
-        <line x1="14" y1="48" x2="50" y2="48" />
-      </g>
-    `);
+    return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;
+      font:900 ${Math.max(11, Math.round(size*0.34))}px/1 Arial,sans-serif; letter-spacing:.6px; color:#666;">FOG</div>`;
   }
 
   if (type === "HAZE"){
     return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;
-      font:900 ${Math.max(11, Math.round(size*0.34))}px/1 Arial,sans-serif; letter-spacing:.6px; color:#555;">HZ</div>`;
+      font:900 ${Math.max(11, Math.round(size*0.34))}px/1 Arial,sans-serif; letter-spacing:.6px; color:#666;">HZ</div>`;
   }
 
   if (type === "ICE"){
